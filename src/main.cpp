@@ -1,71 +1,97 @@
 #include <Arduino.h>
-#include "sensor.h"
 #include "leds.h"
 #include "timer.h"
 #include "network.h"
 
 #define LED_R 4
 #define LED_G 5
-#define SWITCH_PIN 7
-#define TRIG_PIN 8
-#define ECHO_PIN 9
+#define BUZZER_PIN 18
+#define SWITCH_PIN 27
+#define PAUSE_PIN 23
 
-const int DIST_THRESHOLD = 20;
+const int TEMPO_LIMITE = 5; // segundos
+bool ultimoEstado = false;   // false = desligado, true = ligado
+bool bipFeito = false;
+
+bool ativadoAnterior = false;
+unsigned long lastBlink = 0;
+bool blinkState = false;
+
 
 void setup()
 {
     Serial.begin(115200);
 
-    sensorInit(TRIG_PIN, ECHO_PIN);
     ledsInit(LED_R, LED_G);
-
+    pinMode(PAUSE_PIN, INPUT_PULLUP);
     pinMode(SWITCH_PIN, INPUT_PULLUP);
+    pinMode(BUZZER_PIN, OUTPUT);
 
-    networkInit("WIFI_SSID", "WIFI_PASSWORD", "10.48.0.188", 5050);
+    networkInit("", "", "10.48.0.188", 5050);
 }
 
 void loop()
 {
-    bool switchState = digitalRead(SWITCH_PIN);
-    long dist = measureDistanceCM();
-
-    // NADA PERTO → LED vermelho → reseta tempo
-    if (dist > DIST_THRESHOLD)
+    bool ativo = (digitalRead(SWITCH_PIN) == LOW); // switch pressionado/ativado
+    bool pausePressionado = (digitalRead(PAUSE_PIN) == LOW);
+    // -----------------------
+    // SWITCH DESLIGADO → LED vermelho → zera tempo
+    // -----------------------
+    if (!ativo)
     {
-        setRGB(1, 0);
+        setRGB(1, 0); // vermelho
 
-        unsigned long tempo = timerGetSeconds();
+        unsigned long t = timerGetSeconds();
 
-        if (tempo > 20)
+        if (t > TEMPO_LIMITE)
         {
-            sendData("MWM035 000 000", tempo, 1);
+            sendData("MWM035 000 000", t, 1);
         }
+
+        bipFeito = false;   // permite novo bip quando ativar de novo
+        ultimoEstado = false;
 
         timerReset();
         return;
     }
 
-    // SENSOR ATIVO + SWITCH DESLIGADO → verde fixo
-    if (switchState == HIGH)
+    if (pausePressionado)
     {
-        setRGB(0, 1);
-        timerStart();
+        // Pausar a contagem
+        timerPause();
 
-        Serial.print("Tempo ativo: ");
-        Serial.println(timerGetSeconds());
+        // Piscar LED vermelho ↔ verde
+        if (millis() - lastBlink >= 300)
+        {
+            lastBlink = millis();
+            blinkState = !blinkState;
+
+            if (blinkState)
+                setRGB(1, 0); // vermelho
+            else
+                setRGB(0, 1); // verde
+        }
+
         return;
     }
 
-    // SENSOR ATIVO + SWITCH LIGADO → piscar
-    static unsigned long prev = 0;
-    static bool state = false;
+    // -----------------------
+    // SWITCH LIGADO → LED verde → contar tempo
+    // -----------------------
+    setRGB(0, 1); // verde
 
-    if (millis() - prev >= 500)
+    timerStart();
+
+     // ---------- BIP NA TRANSIÇÃO ----------
+    if (ativo && !ultimoEstado && !bipFeito)
     {
-        prev = millis();
-        state = !state;
-        setRGB(state, !state);
-    }
+        digitalWrite(BUZZER_PIN, HIGH);
+        delay(1000);  // bip curto 1s
+        digitalWrite(BUZZER_PIN, LOW);
 
-    timerPause();
+        bipFeito = true;
+    }
+    ultimoEstado = true;
+    Serial.print("Tempo ativo: ");
+    Serial.println(timerGetSeconds());
 }
