@@ -34,7 +34,7 @@ void setup()
     pinMode(SWITCH_PIN, INPUT_PULLUP);
     pinMode(BUZZER_PIN, OUTPUT);
 
-    networkInit("LANX CABLES", "Lanx@2029", "10.48.0.188", 5050);
+    networkInit("", "", "10.48.0.113", 5050);
 }
 
 void loop()
