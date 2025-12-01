@@ -8,14 +8,16 @@ static int _serverPort;
 
 bool safeConnect();
 
-void networkInit(const char* ssid, const char* pass, const char* serverIP, int port) {
+void networkInit(const char *ssid, const char *pass, const char *serverIP, int port)
+{
     _serverIP = serverIP;
     _serverPort = port;
 
     Serial.println("[WiFi] Conectando...");
     WiFi.begin(ssid, pass);
 
-    while (WiFi.status() != WL_CONNECTED) {
+    while (WiFi.status() != WL_CONNECTED)
+    {
         delay(300);
         Serial.print(".");
     }
@@ -30,13 +32,15 @@ void networkInit(const char* ssid, const char* pass, const char* serverIP, int p
 // ------------------------
 //  Conexão com verificação
 // ------------------------
-bool safeConnect() {
+bool safeConnect()
+{
     Serial.println("[TCP] Conectando...");
 
-    client.stop();   // limpa estado antigo
+    client.stop(); // limpa estado antigo
     delay(100);
 
-    if (client.connect(_serverIP.c_str(), _serverPort, 2000)) {
+    if (client.connect(_serverIP.c_str(), _serverPort, 2000))
+    {
         Serial.println("[TCP] Conectado!");
         return true;
     }
@@ -48,31 +52,37 @@ bool safeConnect() {
 // ------------------------
 //  Envio seguro
 // ------------------------
-void sendData(const char* codigo, unsigned long tempo, int qtd) {
-
-    // --- WiFi perdido ---
-    if (WiFi.status() != WL_CONNECTED) {
+void sendData(const char *codigo,
+              unsigned long tempoProd,
+              unsigned long tempoPause,
+              unsigned long tempoTotal,
+              int qtd)
+{
+    if (WiFi.status() != WL_CONNECTED)
+    {
         Serial.println("[WiFi] Desconectado!.");
         return;
     }
 
-    // --- Socket quebrado ---
-    if (!client.connected()) {
+    if (!client.connected())
+    {
         Serial.println("[TCP] Socket morto! Reconectando...");
-
-        if (!safeConnect()) {
-            Serial.println("[TCP] Falha ao reconectar. Abortando.");
+        if (!safeConnect())
             return;
-        }
     }
 
-    // Montagem da mensagem SEM \r
-    String msg = String(codigo) + ";" + tempo + ";" + qtd + "\n";
+    String msg =
+        String(codigo) + ";" +
+        tempoProd + ";" +
+        tempoPause + ";" +
+        tempoTotal + ";" +
+        qtd + "\n";
 
-    size_t enviado = client.write((const uint8_t*)msg.c_str(), msg.length());
+    size_t enviado = client.write((const uint8_t *)msg.c_str(), msg.length());
 
-    if (enviado != msg.length()) {
-        Serial.println("[TCP] Erro ao enviar! Forçando reconexão...");
+    if (enviado != msg.length())
+    {
+        Serial.println("[TCP] Erro ao enviar! Reconectando...");
         safeConnect();
         return;
     }

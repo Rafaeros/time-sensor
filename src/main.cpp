@@ -9,14 +9,21 @@
 #define SWITCH_PIN 27
 #define PAUSE_PIN 23
 
-const int TEMPO_LIMITE = 5; // segundos
-bool ultimoEstado = false;   // false = desligado, true = ligado
+// tempo mínimo para enviar (só envia se for maior que isso)
+const int TEMPO_LIMITE = 5;
+
+// Flags e variáveis internas
+bool ultimoEstado = false;
 bool bipFeito = false;
 
-bool ativadoAnterior = false;
 unsigned long lastBlink = 0;
 bool blinkState = false;
 
+unsigned long producaoStart = 0;
+unsigned long pausaStart = 0;
+
+unsigned long tempoProducao = 0;
+unsigned long tempoPausa = 0;
 
 void setup()
 {
@@ -27,71 +34,117 @@ void setup()
     pinMode(SWITCH_PIN, INPUT_PULLUP);
     pinMode(BUZZER_PIN, OUTPUT);
 
-    networkInit("", "", "10.48.0.188", 5050);
+    networkInit("LANX CABLES", "Lanx@2029", "10.48.0.188", 5050);
 }
 
 void loop()
 {
-    bool ativo = (digitalRead(SWITCH_PIN) == LOW); // switch pressionado/ativado
-    bool pausePressionado = (digitalRead(PAUSE_PIN) == LOW);
-    // -----------------------
-    // SWITCH DESLIGADO → LED vermelho → zera tempo
-    // -----------------------
+    bool ativo = (digitalRead(SWITCH_PIN) == LOW);      // sensor ativo
+    bool pausePressionado = (digitalRead(PAUSE_PIN) == LOW); // botão de pausa
+
+    // ======================================================
+    //  SENSOR DESATIVADO → FINALIZA CICLO E ENVIA TEMPOS
+    // ======================================================
     if (!ativo)
     {
-        setRGB(1, 0); // vermelho
+        setRGB(1, 0); // LED vermelho
 
-        unsigned long t = timerGetSeconds();
+        // Finaliza tempos se estavam rolando
+        if (producaoStart > 0)
+            tempoProducao += (millis() - producaoStart);
 
-        if (t > TEMPO_LIMITE)
+        if (pausaStart > 0)
+            tempoPausa += (millis() - pausaStart);
+
+        unsigned long tempoTotal = tempoProducao + tempoPausa;
+
+        if (tempoTotal > TEMPO_LIMITE * 1000)
         {
-            sendData("MWM035 000 000", t, 1);
+            // Envia: código, produção, pausa, total, qtd (sempre 1)
+            sendData(
+                "TKC110 002 002",
+                tempoProducao / 1000,
+                tempoPausa / 1000,
+                tempoTotal / 1000,
+                1
+            );
         }
 
-        bipFeito = false;   // permite novo bip quando ativar de novo
+        // Reset das variáveis
+        producaoStart = 0;
+        pausaStart = 0;
+        tempoProducao = 0;
+        tempoPausa = 0;
+        bipFeito = false;
         ultimoEstado = false;
 
-        timerReset();
         return;
     }
 
+    // ======================================================
+    //  ATIVO + PAUSE → PISCAR LED E CONTAR PAUSA
+    // ======================================================
     if (pausePressionado)
     {
-        // Pausar a contagem
-        timerPause();
+        // Pausa produção
+        if (producaoStart > 0)
+        {
+            tempoProducao += (millis() - producaoStart);
+            producaoStart = 0;
+        }
 
-        // Piscar LED vermelho ↔ verde
+        // Inicia pausa
+        if (pausaStart == 0)
+            pausaStart = millis();
+
+        // Piscar LED vermelho / verde
         if (millis() - lastBlink >= 300)
         {
             lastBlink = millis();
             blinkState = !blinkState;
 
             if (blinkState)
-                setRGB(1, 0); // vermelho
+                setRGB(1, 0);
             else
-                setRGB(0, 1); // verde
+                setRGB(0, 1);
         }
 
         return;
     }
 
-    // -----------------------
-    // SWITCH LIGADO → LED verde → contar tempo
-    // -----------------------
-    setRGB(0, 1); // verde
+    // ======================================================
+    //  ATIVO SEM PAUSE → CONTAGEM DE PRODUÇÃO
+    // ======================================================
 
-    timerStart();
+    setRGB(0, 1); // LED verde
 
-     // ---------- BIP NA TRANSIÇÃO ----------
+    // Parar contagem de pausa se estava pausado
+    if (pausaStart > 0)
+    {
+        tempoPausa += (millis() - pausaStart);
+        pausaStart = 0;
+    }
+
+    // Inicia contagem de produção
+    if (producaoStart == 0)
+        producaoStart = millis();
+
+    // ---------- BIP NA TRANSIÇÃO ----------
     if (ativo && !ultimoEstado && !bipFeito)
     {
         digitalWrite(BUZZER_PIN, HIGH);
-        delay(1000);  // bip curto 1s
+        delay(100);
         digitalWrite(BUZZER_PIN, LOW);
 
         bipFeito = true;
     }
+
     ultimoEstado = true;
-    Serial.print("Tempo ativo: ");
-    Serial.println(timerGetSeconds());
+
+    // Debug
+    Serial.print("Produção: ");
+    Serial.print((tempoProducao + (producaoStart ? millis() - producaoStart : 0)) / 1000);
+    Serial.print("s | Pausa: ");
+    Serial.print((tempoPausa + (pausaStart ? millis() - pausaStart : 0)) / 1000);
+    Serial.println("s");
 }

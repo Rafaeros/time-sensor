@@ -2,6 +2,6 @@
 #define NETWORK_H
 
 void networkInit(const char* ssid, const char* pass, const char* serverIP, int port);
-void sendData(const char* codigo, unsigned long tempo, int qtd);
+void sendData(const char* codigo, unsigned long tempoProducao, unsigned long tempoPausa, unsigned long tempoTotal, int qtd);
 
 #endif
