@@ -2,8 +2,7 @@
 # PyInstaller specification file for building the TCP + Flask realtime log monitor
 
 import os
-from PyInstaller.utils.hooks import collect_submodules
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 # Caminhos importantes
 project_dir = os.path.abspath(".")
@@ -22,10 +21,18 @@ if os.path.isdir(static_dir):
     datas.append((static_dir, "static"))
 
 if os.path.isdir(tmp_dir):
-    datas.append((tmp_dir, "tmp"))  # opcional
+    datas.append((tmp_dir, "tmp"))  # logs
 
-# Coleta módulos do Flask para evitar erro de import
-hiddenimports = collect_submodules("flask")
+# --- IMPORTANTÍSSIMO ---
+# FLASK + DEPENDÊNCIAS INTERNAS
+hiddenimports = (
+    collect_submodules("flask") +
+    collect_submodules("jinja2") +
+    collect_submodules("werkzeug") +
+    collect_submodules("itsdangerous") +
+    collect_submodules("click") +
+    collect_submodules("markupsafe")
+)
 
 # ---
 # BUILD
@@ -33,7 +40,7 @@ hiddenimports = collect_submodules("flask")
 block_cipher = None
 
 a = Analysis(
-    ['main.py'],      # seu arquivo principal
+    ['main.py'],
     pathex=[project_dir],
     binaries=[],
     datas=datas,
@@ -57,11 +64,11 @@ exe = EXE(
     a.datas,
     [],
     name='monitor_realtime',
-    debug=False,
+    debug=True,          # EXIBE TODOS ERROS
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    console=True     # MOSTRA O TERMINAL !!!
+    upx=False,
+    console=True         # MOSTRA O TERMINAL!
 )
 
 coll = COLLECT(
@@ -70,7 +77,7 @@ coll = COLLECT(
     a.zipfiles,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name='monitor_build'
 )
