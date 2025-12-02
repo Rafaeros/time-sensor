@@ -14,11 +14,10 @@ def resource_path(relative_path):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
 
-
-BASE_DIR = resource_path("api")
-TMP_DIR = os.path.join(BASE_DIR, "tmp")
-STATIC_DIR = os.path.join(BASE_DIR, "static")
-TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+BASE_DIR = resource_path(".")
+TEMPLATES_DIR = resource_path("templates")
+STATIC_DIR = resource_path("static")
+TMP_DIR = resource_path("tmp")
 
 LOGS_PATH = os.path.join(TMP_DIR, "logs.txt")
 
@@ -97,6 +96,7 @@ def tcp_server():
 # -----------------------------------------------------------
 # SERVIDOR FLASK
 # -----------------------------------------------------------
+
 
 app = Flask(
     __name__,
