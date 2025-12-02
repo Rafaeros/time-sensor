@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<title>Logs em Tempo Real</title>
+
+<!-- TailwindCSS CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+</head>
+<body class="font-sans bg-gray-100">
+
+<header class="flex flex-row items-center justify-start mb-6  p-6 bg-gray-300 shadow">
+    <img  class="h-12" src="../static/logo.png" alt="Lanx Cables">
+</header>
+
+<div class="overflow-x-auto p-6">
+<h1 class="text-2xl font-bold mb-4">Logs em Tempo Real</h1>
+<table class="min-w-full border border-gray-400 bg-white rounded-lg shadow">
+    <thead>
+        <tr class="bg-gray-900 text-white">
+            <th class="px-4 py-2 border border-gray-700">Data</th>
+            <th class="px-4 py-2 border border-gray-700">Produto</th>
+            <th class="px-4 py-2 border border-gray-700">Tempo Produção</th>
+            <th class="px-4 py-2 border border-gray-700">Tempo Pausa</th>
+            <th class="px-4 py-2 border border-gray-700">Tempo Total</th>
+            <th class="px-4 py-2 border border-gray-700">Quantidade</th>
+        </tr>
+    </thead>
+
+    <tbody id="logTable"></tbody>
+</table>
+</div>
+
+<script>
+function secToHMS(segundos) {
+    segundos = Number(segundos);
+    const h = Math.floor(segundos / 3600);
+    const m = Math.floor((segundos % 3600) / 60);
+    const s = segundos % 60;
+
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+}
+
+async function updateLogs() {
+    const response = await fetch("/logs");
+    const logs = await response.json();
+
+    const tbody = document.getElementById("logTable");
+    tbody.innerHTML = "";
+
+    logs.forEach(log => {
+        const row = `
+        <tr class="odd:bg-gray-100 even:bg-white">
+            <td class="px-4 py-2 border border-gray-300">${log.data}</td>
+            <td class="px-4 py-2 border border-gray-300">${log.produto}</td>
+            <td class="px-4 py-2 border border-gray-300">${secToHMS(log.tempo_producao)}</td>
+            <td class="px-4 py-2 border border-gray-300">${secToHMS(log.tempo_pausa)}</td>
+            <td class="px-4 py-2 border border-gray-300">${secToHMS(log.tempo_total)}</td>
+            <td class="px-4 py-2 border border-gray-300">${log.quantidade}</td>
+        </tr>
+        `;
+        tbody.innerHTML += row;
+    });
+}
+
+setInterval(updateLogs, 2000);
+updateLogs();
+</script>
+
+</body>
+</html>
