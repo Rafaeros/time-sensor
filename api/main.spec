@@ -7,12 +7,10 @@ project_dir = os.path.abspath('.')  # <-- agora aponta para API/
 
 templates_dir = os.path.join(project_dir, 'templates')
 static_dir    = os.path.join(project_dir, 'static')
-tmp_dir       = os.path.join(project_dir, 'tmp')
 
 datas = [
     (templates_dir, 'api/templates'),
-    (static_dir, 'api/static'),
-    (tmp_dir, 'api/tmp'),
+    (static_dir, 'api/static')
 ]
 
 hiddenimports = (

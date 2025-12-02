@@ -9,8 +9,9 @@ from flask import Flask, render_template, jsonify
 # -----------------------------------------------------------
 # CONFIGURAÇÃO DE PASTAS
 # -----------------------------------------------------------
+
 def resource_path(relative_path):
-    if hasattr(sys, "_MEIPASS"):
+    if hasattr(sys, '_MEIPASS'):  # Estamos dentro do executável PyInstaller
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
 
@@ -100,8 +101,8 @@ def tcp_server():
 
 app = Flask(
     __name__,
-    template_folder=TEMPLATES_DIR,
-    static_folder=STATIC_DIR
+    template_folder=resource_path("api/templates"),
+    static_folder=resource_path("api/static")
 )
 
 @app.route("/")
