@@ -1,4 +1,5 @@
 import os
+import sys
 import socket
 import datetime
 import threading
@@ -8,8 +9,13 @@ from flask import Flask, render_template, jsonify
 # -----------------------------------------------------------
 # CONFIGURAÇÃO DE PASTAS
 # -----------------------------------------------------------
+def resource_path(relative_path):
+    if hasattr(sys, "_MEIPASS"):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 
-BASE_DIR = "api"
+
+BASE_DIR = resource_path("api")
 TMP_DIR = os.path.join(BASE_DIR, "tmp")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -91,12 +97,11 @@ def tcp_server():
 # -----------------------------------------------------------
 # SERVIDOR FLASK
 # -----------------------------------------------------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = Flask(
     __name__,
-    template_folder=os.path.join(BASE_DIR, "templates"),
-    static_folder=os.path.join(BASE_DIR, "static")
+    template_folder=TEMPLATES_DIR,
+    static_folder=STATIC_DIR
 )
 
 @app.route("/")

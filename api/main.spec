@@ -4,24 +4,12 @@
 import os
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
-# Caminhos importantes
-project_dir = os.path.abspath(".")
-api_dir = os.path.join(project_dir, "api")
-templates_dir = os.path.join(api_dir, "templates")
-static_dir = os.path.join(api_dir, "static")
-tmp_dir = os.path.join(api_dir, "tmp")
+datas = [
+    ('api/templates', 'api/templates'),
+    ('api/static', 'api/static'),
+    ('api/tmp', 'api/tmp'),
+]
 
-# Inclui templates e arquivos estáticos
-datas = []
-
-if os.path.isdir(templates_dir):
-    datas.append((templates_dir, "templates"))
-
-if os.path.isdir(static_dir):
-    datas.append((static_dir, "static"))
-
-if os.path.isdir(tmp_dir):
-    datas.append((tmp_dir, "tmp"))  # logs
 
 # --- IMPORTANTÍSSIMO ---
 # FLASK + DEPENDÊNCIAS INTERNAS
