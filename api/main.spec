@@ -2,17 +2,19 @@
 # PyInstaller specification file for building the TCP + Flask realtime log monitor
 
 import os
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from PyInstaller.utils.hooks import collect_submodules
 
+# Caminho base do projeto
+project_dir = os.path.abspath('.')   # <-- ESSENCIAL! VOCÊ ESQUECEU ISSO
+
+# INCLUSÃO DE TEMPLATES E ESTÁTICOS
 datas = [
-    ('api/templates', 'api/templates'),
-    ('api/static', 'api/static'),
-    ('api/tmp', 'api/tmp'),
+    (os.path.join('api', 'templates'), 'api/templates'),
+    (os.path.join('api', 'static'), 'api/static'),
+    (os.path.join('api', 'tmp'), 'api/tmp'),
 ]
 
-
-# --- IMPORTANTÍSSIMO ---
-# FLASK + DEPENDÊNCIAS INTERNAS
+# HIDDEN IMPORTS PARA FLASK E DEPENDÊNCIAS
 hiddenimports = (
     collect_submodules("flask") +
     collect_submodules("jinja2") +
@@ -52,11 +54,11 @@ exe = EXE(
     a.datas,
     [],
     name='monitor_realtime',
-    debug=True,          # EXIBE TODOS ERROS
+    debug=True,          # VER ERROS NO TERMINAL
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=True         # MOSTRA O TERMINAL!
+    console=True         # MOSTRA TERMINAL
 )
 
 coll = COLLECT(
