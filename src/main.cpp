@@ -34,12 +34,12 @@ void setup()
     pinMode(SWITCH_PIN, INPUT_PULLUP);
     pinMode(BUZZER_PIN, OUTPUT);
 
-    networkInit("", "", "10.48.0.113", 5050);
+    networkInit("", "", "", 5050);
 }
 
 void loop()
 {
-    bool ativo = (digitalRead(SWITCH_PIN) == LOW);      // sensor ativo
+    bool ativo = (digitalRead(SWITCH_PIN) == LOW);           // sensor ativo
     bool pausePressionado = (digitalRead(PAUSE_PIN) == LOW); // botão de pausa
 
     // ======================================================
@@ -60,7 +60,9 @@ void loop()
 
         if (tempoTotal > TEMPO_LIMITE * 1000)
         {
-            // Envia: código, produção, pausa, total, qtd (sempre 1)
+            // ======================================================
+            //  ENVIO COM VALIDAÇÃO DE CONEXÃO (não perde log)
+            // ======================================================
             sendData(
                 "TKC110 002 002",
                 tempoProducao / 1000,
@@ -68,6 +70,11 @@ void loop()
                 tempoTotal / 1000,
                 1
             );
+            // O sendData() já:
+            // - verifica WiFi
+            // - verifica socket
+            // - reconecta automaticamente se falhar
+            // - tenta reenviar se for necessário
         }
 
         // Reset das variáveis
@@ -133,7 +140,7 @@ void loop()
     if (ativo && !ultimoEstado && !bipFeito)
     {
         digitalWrite(BUZZER_PIN, HIGH);
-        delay(100);
+        delay(1000);
         digitalWrite(BUZZER_PIN, LOW);
 
         bipFeito = true;
