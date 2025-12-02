@@ -10,16 +10,27 @@ from flask import Flask, render_template, jsonify
 # CONFIGURAÇÃO DE PASTAS
 # -----------------------------------------------------------
 
-def resource_path(relative_path):
-    if hasattr(sys, '_MEIPASS'):  # Estamos dentro do executável PyInstaller
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
+def resource_path(relative):
+    if hasattr(sys, '_MEIPASS'):
+        # Dentro do executável
+        base = sys._MEIPASS
+    else:
+        # Executando normal (Linux ou Windows sem EXE)
+        base = os.path.dirname(os.path.abspath(__file__))
+
+    return os.path.join(base, relative)
+
+
+# agora tenta achar onde os templates realmente estão
+if hasattr(sys, '_MEIPASS'):
+    TEMPLATES_DIR = resource_path("api/templates")  # dentro do exe
+    STATIC_DIR    = resource_path("api/static")
+else:
+    TEMPLATES_DIR = resource_path("templates")       # rodando normal
+    STATIC_DIR    = resource_path("static")
 
 BASE_DIR = resource_path(".")
-TEMPLATES_DIR = resource_path("templates")
-STATIC_DIR = resource_path("static")
 TMP_DIR = resource_path("tmp")
-
 LOGS_PATH = os.path.join(TMP_DIR, "logs.txt")
 
 # -----------------------------------------------------------
@@ -101,8 +112,8 @@ def tcp_server():
 
 app = Flask(
     __name__,
-    template_folder=resource_path("api/templates"),
-    static_folder=resource_path("api/static")
+    template_folder=TEMPLATES_DIR,
+    static_folder=STATIC_DIR
 )
 
 @app.route("/")

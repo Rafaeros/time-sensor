@@ -42,6 +42,20 @@ function secToHMS(segundos) {
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
 }
 
+function formatDatetime(datetime) {
+    const date = new Date(datetime);
+
+    const dd = String(date.getDate()).padStart(2, "0");
+    const mm = String(date.getMonth() + 1).padStart(2, "0"); // mês começa do zero
+    const yyyy = date.getFullYear();
+
+    const hh = String(date.getHours()).padStart(2, "0");
+    const min = String(date.getMinutes()).padStart(2, "0");
+    const ss = String(date.getSeconds()).padStart(2, "0");
+
+    return `${dd}/${mm}/${yyyy} ${hh}:${min}:${ss}`;
+}
+
 async function updateLogs() {
     const response = await fetch("/logs");
     const logs = await response.json();
@@ -52,7 +66,7 @@ async function updateLogs() {
     logs.forEach(log => {
         const row = `
         <tr class="odd:bg-gray-100 even:bg-white">
-            <td class="px-4 py-2 border border-gray-300">${log.data}</td>
+            <td class="px-4 py-2 border border-gray-300">${formatDatetime(log.data)}</td>
             <td class="px-4 py-2 border border-gray-300">${log.produto}</td>
             <td class="px-4 py-2 border border-gray-300">${secToHMS(log.tempo_producao)}</td>
             <td class="px-4 py-2 border border-gray-300">${secToHMS(log.tempo_pausa)}</td>
