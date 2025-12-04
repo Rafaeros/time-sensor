@@ -52,7 +52,7 @@ def salvar_log(texto):
     # Cria cabeçalho se o arquivo não existir
     if not os.path.exists(LOGS_PATH):
         with open(LOGS_PATH, "w") as f:
-            f.write("data;produto;tempo_producao;tempo_pausa;tempo_total;quantidade\n")
+            f.write(texto + "\n")
 
     # Adiciona nova linha
     with open(LOGS_PATH, "a") as f:
@@ -124,22 +124,22 @@ def index():
 @app.route("/logs")
 def get_logs():
     if not os.path.exists(LOGS_PATH):
-        return jsonify([])
+        return jsonify({})
 
-    logs = []
+    registros = []
     with open(LOGS_PATH) as f:
-        linhas = f.readlines()
-
-    # Remove cabeçalho e pega últimas 200 entradas
-    linhas = [l.strip() for l in linhas if "|" in l][-200:]
+        linhas = [l.strip() for l in f.readlines() if " | " in l]
 
     for linha in linhas:
         try:
-            data, resto = linha.split(" | ")
+            data_str, resto = linha.split(" | ")
             produto, tp, pausa, total, qtd = resto.split(";")
 
-            logs.append({
-                "data": data,
+            dt = datetime.datetime.strptime(data_str, "%Y-%m-%d %H:%M:%S")
+
+            registros.append({
+                "data": data_str,
+                "datetime": dt,
                 "produto": produto,
                 "tempo_producao": int(tp),
                 "tempo_pausa": int(pausa),
@@ -150,7 +150,36 @@ def get_logs():
         except Exception as e:
             print("[ERRO PARSE]", linha, e)
 
-    return jsonify(logs)
+    # Ordena do mais novo → mais antigo
+    registros.sort(key=lambda x: x["datetime"], reverse=True)
+
+    # Agrupa por produto + calcula média com TODOS os registros
+    produtos = {}
+
+    for r in registros:
+        prod = r["produto"]
+
+        if prod not in produtos:
+            produtos[prod] = {
+                "media": 0,
+                "logs": [],
+                "_soma": 0,
+                "_count": 0
+            }
+
+        produtos[prod]["_soma"] += r["tempo_total"]
+        produtos[prod]["_count"] += 1
+
+        produtos[prod]["logs"].append(r)
+
+    # Finalizar: calcular média e limitar a 50 registros
+    for prod in produtos:
+        produtos[prod]["media"] = produtos[prod]["_soma"] / produtos[prod]["_count"]
+        produtos[prod]["logs"] = produtos[prod]["logs"][:50]  # só os 50 mais recentes
+        del produtos[prod]["_soma"]
+        del produtos[prod]["_count"]
+
+    return jsonify(produtos)
 
 
 def flask_server():

@@ -10,45 +10,36 @@
 </head>
 <body class="font-sans bg-gray-100">
 
-<header class="flex flex-row items-center justify-start mb-6  p-6 bg-gray-300 shadow">
-    <img  class="h-12" src="../static/logo.png" alt="Lanx Cables">
+<header class="flex flex-row items-center justify-start mb-6 p-6 bg-gray-300 shadow">
+    <img class="h-12" src="../static/logo.png" alt="Lanx Cables">
 </header>
 
-<div class="overflow-x-auto p-6">
-<h1 class="text-2xl font-bold mb-4">Logs em Tempo Real</h1>
-<table class="min-w-full border border-gray-400 bg-white rounded-lg shadow">
-    <thead>
-        <tr class="bg-gray-900 text-white">
-            <th class="px-4 py-2 border border-gray-700">Data</th>
-            <th class="px-4 py-2 border border-gray-700">Produto</th>
-            <th class="px-4 py-2 border border-gray-700">Tempo Produção</th>
-            <th class="px-4 py-2 border border-gray-700">Tempo Pausa</th>
-            <th class="px-4 py-2 border border-gray-700">Tempo Total</th>
-            <th class="px-4 py-2 border border-gray-700">Quantidade</th>
-        </tr>
-    </thead>
+<div class="p-6">
+    <h1 class="text-2xl font-bold mb-6">Logs em Tempo Real</h1>
 
-    <tbody id="logTable"></tbody>
-</table>
+    <div id="produtosContainer"></div>
 </div>
 
 <script>
+// -------------------------------------------------------------------------
+// Funções auxiliares
+// -------------------------------------------------------------------------
+
 function secToHMS(segundos) {
     segundos = Number(segundos);
     const h = Math.floor(segundos / 3600);
     const m = Math.floor((segundos % 3600) / 60);
     const s = segundos % 60;
-
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+    return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
 }
 
 function formatDatetime(datetime) {
     const date = new Date(datetime);
+    if (isNaN(date)) return datetime;
 
     const dd = String(date.getDate()).padStart(2, "0");
-    const mm = String(date.getMonth() + 1).padStart(2, "0"); // mês começa do zero
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
     const yyyy = date.getFullYear();
-
     const hh = String(date.getHours()).padStart(2, "0");
     const min = String(date.getMinutes()).padStart(2, "0");
     const ss = String(date.getSeconds()).padStart(2, "0");
@@ -56,30 +47,84 @@ function formatDatetime(datetime) {
     return `${dd}/${mm}/${yyyy} ${hh}:${min}:${ss}`;
 }
 
+// -------------------------------------------------------------------------
+// Atualização dos logs
+// -------------------------------------------------------------------------
+
 async function updateLogs() {
     const response = await fetch("/logs");
-    const logs = await response.json();
+    const data = await response.json();
 
-    const tbody = document.getElementById("logTable");
-    tbody.innerHTML = "";
+    const container = document.getElementById("produtosContainer");
+    container.innerHTML = "";
 
-    logs.forEach(log => {
-        const row = `
-        <tr class="odd:bg-gray-100 even:bg-white">
-            <td class="px-4 py-2 border border-gray-300">${formatDatetime(log.data)}</td>
-            <td class="px-4 py-2 border border-gray-300">${log.produto}</td>
-            <td class="px-4 py-2 border border-gray-300">${secToHMS(log.tempo_producao)}</td>
-            <td class="px-4 py-2 border border-gray-300">${secToHMS(log.tempo_pausa)}</td>
-            <td class="px-4 py-2 border border-gray-300">${secToHMS(log.tempo_total)}</td>
-            <td class="px-4 py-2 border border-gray-300">${log.quantidade}</td>
-        </tr>
+    for (const produto in data) {
+
+        const media = data[produto].media;
+        const logs  = data[produto].logs;
+
+        let tabelaHTML = `
+        <div class="mb-10">
+
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-xl font-semibold">${produto}</h2>
+
+                <span class="text-sm bg-blue-600 text-white px-3 py-1 rounded shadow">
+                    Tempo Médio: ${secToHMS(Math.round(media))}
+                </span>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="min-w-full border border-gray-400 bg-white rounded-lg shadow">
+                    <thead>
+                        <tr class="bg-gray-900 text-white">
+                            <th class="px-4 py-2 border border-gray-700">#</th>
+                            <th class="px-4 py-2 border border-gray-700">Data</th>
+                            <th class="px-4 py-2 border border-gray-700">Tempo Produção</th>
+                            <th class="px-4 py-2 border border-gray-700">Tempo Pausa</th>
+                            <th class="px-4 py-2 border border-gray-700">Tempo Total</th>
+                            <th class="px-4 py-2 border border-gray-700">Quantidade</th>
+                        </tr>
+                    </thead>
+                    <tbody>
         `;
-        tbody.innerHTML += row;
-    });
+
+        logs.forEach((log, idx) => {
+            let total = Number(log.tempo_total);
+
+            // 🔥 Classes de cor baseadas no desempenho
+            let rowColor = total < media ? "bg-red-200" : "bg-green-200";
+            let totalColor = total < media ? "text-red-700 font-bold" : "text-green-700 font-bold";
+
+            tabelaHTML += `
+                <tr class="${rowColor}">
+                    <td class="px-4 py-2 border border-gray-300 font-semibold text-center">${idx + 1}</td>
+                    <td class="px-4 py-2 border border-gray-300">${formatDatetime(log.data)}</td>
+                    <td class="px-4 py-2 border border-gray-300">${secToHMS(log.tempo_producao)}</td>
+                    <td class="px-4 py-2 border border-gray-300">${secToHMS(log.tempo_pausa)}</td>
+                    <td class="px-4 py-2 border border-gray-300 ${totalColor}">
+                        ${secToHMS(total)}
+                    </td>
+                    <td class="px-4 py-2 border border-gray-300">${log.quantidade}</td>
+                </tr>
+            `;
+        });
+
+        tabelaHTML += `
+                    </tbody>
+                </table>
+            </div>
+
+        </div>
+        `;
+
+        container.innerHTML += tabelaHTML;
+    }
 }
 
 setInterval(updateLogs, 2000);
 updateLogs();
+
 </script>
 
 </body>
