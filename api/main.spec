@@ -3,34 +3,19 @@
 import os
 from PyInstaller.utils.hooks import collect_submodules
 
-# -----------------------------------------------------------
-# Diretório raiz do projeto (onde fica main.py)
-# -----------------------------------------------------------
-project_dir = os.path.abspath('.')  
-
-# -----------------------------------------------------------
-# Pastas do Flask
-# -----------------------------------------------------------
+project_dir = os.path.abspath('.')  # pasta /api/
 templates_dir = os.path.join(project_dir, 'templates')
 static_dir    = os.path.join(project_dir, 'static')
+core_dir      = os.path.join(project_dir, 'core')
+configs_file  = os.path.join(project_dir, 'configs.json')
 
-# -----------------------------------------------------------
-# Arquivo de configs
-# -----------------------------------------------------------
-configs_file = os.path.join(project_dir, 'configs.json')
-
-# -----------------------------------------------------------
-# Datas para embutir no .exe
-# -----------------------------------------------------------
 datas = [
-    (templates_dir, 'api/templates'),
-    (static_dir, 'api/static'),
-    (configs_file, '.')    # <-- adiciona o configs.json na raiz do exe
+    (templates_dir, "api/templates"),
+    (static_dir, "api/static"),
+    (core_dir, "api/core"),
+    (configs_file, ".")  # configs.json vai para a raiz do EXE
 ]
 
-# -----------------------------------------------------------
-# Hidden imports (necessários ao Flask/Jinja)
-# -----------------------------------------------------------
 hiddenimports = (
     collect_submodules("flask") +
     collect_submodules("jinja2") +
@@ -42,11 +27,8 @@ hiddenimports = (
 
 block_cipher = None
 
-# -----------------------------------------------------------
-# Analysis
-# -----------------------------------------------------------
 a = Analysis(
-    ['main.py'],           # seu arquivo principal
+    ['main.py'],
     pathex=[project_dir],
     datas=datas,
     hiddenimports=hiddenimports
@@ -54,10 +36,6 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data)
 
-# -----------------------------------------------------------
-# EXE
-# Use console=True para ver logs; pode trocar para False se quiser app silencioso
-# -----------------------------------------------------------
 exe = EXE(
     pyz,
     a.scripts,
@@ -67,12 +45,9 @@ exe = EXE(
     [],
     name='monitor_realtime',
     console=True,
-    debug=False
+    debug=False  # coloque False para evitar janelas de debug
 )
 
-# -----------------------------------------------------------
-# COLLECT (monta pasta final)
-# -----------------------------------------------------------
 coll = COLLECT(
     exe,
     a.binaries,
