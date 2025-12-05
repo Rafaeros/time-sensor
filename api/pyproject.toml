@@ -1,0 +1,13 @@
+[project]
+name = "api"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "aiohttp>=3.13.2",
+    "beautifulsoup4>=4.14.3",
+    "certifi>=2025.11.12",
+    "datetime>=6.0",
+    "flask>=3.1.2",
+]
