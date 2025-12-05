@@ -41,6 +41,7 @@ from flask import Flask, render_template, jsonify
 # importe seu AuthOnCM do módulo core
 from core.session_manager import AuthOnCM
 from core.utils.path_utils import resource_path
+from collections.abc import Coroutine
 
 # -----------------------------------------------------------
 # PASTAS E PATHS
@@ -237,7 +238,7 @@ def start_async_loop() -> None:
     async_loop.run_forever()
 
 
-def run_async(coro: asyncio.coroutine):
+def run_async(coro: Coroutine):
     return asyncio.run_coroutine_threadsafe(coro, async_loop)
 
 
