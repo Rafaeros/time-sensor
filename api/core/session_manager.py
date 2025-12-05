@@ -168,7 +168,7 @@ class AuthOnCM:
                 logger.info(f"💾 JSON file saved: {file_path}")
 
                 logger.info("✅ Orders fetched!")
-                return await r.text()
+                return order_list.to_dict()
 
 
 async def main():

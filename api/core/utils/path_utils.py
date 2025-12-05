@@ -1,29 +1,27 @@
 import os
 import sys
-
+import pathlib
 
 def resource_path(relative):
     """Retorna caminhos tanto no EXE quanto em modo normal."""
-    if hasattr(sys, "_MEIPASS"):  # rodando no .exe
-        base = sys._MEIPASS
+    if hasattr(sys, "_MEIPASS"):  # rodando PyInstaller
+        base = pathlib.Path(sys.executable).parent
     else:
-        base = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base, relative)
+        base = pathlib.Path(__file__).parent
+    return str(base / relative)
 
 
 def get_logs_dir():
     """
-    Define uma pasta persistente para armazenar logs.
-    No EXE do Windows → %APPDATA%/MonitorRealtime
-    No Linux / modo normal → ./tmp
+    Retorna a pasta tmp fixa ao lado do main.py,
+    mesmo no Windows (exe) ou Linux.
     """
-    # Quando é EXE no Windows (PyInstaller)
-    if sys.platform == "win32" and hasattr(sys, "_MEIPASS"):
-        base = os.path.join(os.getenv("APPDATA"), "MonitorRealtime")
-        os.makedirs(base, exist_ok=True)
-        return base
+    # Base do executável OU do script Python
+    if hasattr(sys, "_MEIPASS"):
+        base = pathlib.Path(sys.executable).parent
+    else:
+        base = pathlib.Path(__file__).parent.parent  # sobe para /api
 
-    # Rodando normal
-    base = resource_path("tmp")
-    os.makedirs(base, exist_ok=True)
-    return base
+    tmp = base / "tmp"
+    tmp.mkdir(exist_ok=True)
+    return str(tmp)
