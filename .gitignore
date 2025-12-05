@@ -9,3 +9,4 @@ build/
 output/
 __pycache__
 tmp/
+configs.json
