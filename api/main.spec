@@ -7,13 +7,11 @@ project_dir = os.path.abspath('.')  # pasta /api/
 templates_dir = os.path.join(project_dir, 'templates')
 static_dir    = os.path.join(project_dir, 'static')
 core_dir      = os.path.join(project_dir, 'core')
-configs_file  = os.path.join(project_dir, 'configs.json')
 
 datas = [
-    (templates_dir, "api/templates"),
-    (static_dir, "api/static"),
-    (core_dir, "api/core"),
-    (configs_file, ".")  # configs.json vai para a raiz do EXE
+    (templates_dir, "templates"),
+    (static_dir, "static"),         
+    (core_dir, "core"),                       
 ]
 
 hiddenimports = (

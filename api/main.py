@@ -34,10 +34,12 @@ from collections.abc import Coroutine
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # pasta /api
 
 # Templates e static (compatível com PyInstaller)
-if hasattr(sys, '_MEIPASS'):
-    TEMPLATES_DIR = resource_path("api/templates")
-    STATIC_DIR = resource_path("api/static")
+if getattr(sys, "frozen", False):
+    # Quando empacotado, resource_path já resolve para onde os dados foram extraídos/copiados
+    TEMPLATES_DIR = resource_path("templates")
+    STATIC_DIR = resource_path("static")
 else:
+    # modo dev: templates e static estão em /api/templates e /api/static
     TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
     STATIC_DIR = os.path.join(BASE_DIR, "static")
 
@@ -64,6 +66,7 @@ FLASK_PORT = 8080
 # LOGGER
 # -----------------------------------------------------------
 
+
 def salvar_log(texto: str) -> None:
     pathlib.Path(TMP_DIR).mkdir(parents=True, exist_ok=True)
 
@@ -74,6 +77,7 @@ def salvar_log(texto: str) -> None:
 # -----------------------------------------------------------
 # SERVIDOR TCP
 # -----------------------------------------------------------
+
 
 def handle_client(conn: socket.socket, addr: Any) -> None:
     print(f"[TCP] Conexão de {addr}")
@@ -126,8 +130,14 @@ app = Flask(__name__, template_folder=TEMPLATES_DIR, static_folder=STATIC_DIR)
 def index():
     try:
         return render_template("index.html")
-    except Exception:
-        return jsonify({"status": "ok", "message": "Monitor running"})
+    except Exception as e:
+        return jsonify(
+            {
+                "status": "erro",
+                "mensagem": "Falha ao carregar template",
+                "detalhes": str(e),
+            }
+        )
 
 
 @app.route("/logs")
@@ -146,15 +156,17 @@ def get_logs():
 
             dt = datetime.datetime.strptime(data_str, "%Y-%m-%d %H:%M:%S")
 
-            registros.append({
-                "data": data_str,
-                "datetime": dt,
-                "produto": produto,
-                "tempo_producao": int(tp),
-                "tempo_pausa": int(pausa),
-                "tempo_total": int(total),
-                "quantidade": int(qtd),
-            })
+            registros.append(
+                {
+                    "data": data_str,
+                    "datetime": dt,
+                    "produto": produto,
+                    "tempo_producao": int(tp),
+                    "tempo_pausa": int(pausa),
+                    "tempo_total": int(total),
+                    "quantidade": int(qtd),
+                }
+            )
         except Exception:
             pass
 

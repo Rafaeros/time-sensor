@@ -23,8 +23,6 @@ class ConfigManager:
             self.data = {
                 "username": "",
                 "password": "",
-                "printer": "",
-                "operators": [],
             }
             self.save()
 

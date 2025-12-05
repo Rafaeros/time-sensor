@@ -1,27 +1,31 @@
 import os
 import sys
-import pathlib
+from pathlib import Path
 
-def resource_path(relative):
-    """Retorna caminhos tanto no EXE quanto em modo normal."""
-    if hasattr(sys, "_MEIPASS"):  # rodando PyInstaller
-        base = pathlib.Path(sys.executable).parent
+def resource_path(relative: str) -> str:
+    """
+    Resolve um path tanto no PyInstaller (onefile) quanto em modo normal / one-folder.
+    - Se extraído em tempo de execução: usa sys._MEIPASS
+    - Senão se for pasta coletada (one-folder) usa pasta do executável
+    - Senão usa pasta do arquivo atual (dev)
+    """
+    if getattr(sys, "frozen", False):
+        # Preferir sys._MEIPASS (onefile) — se não existir, fallback para pasta do exe (one-folder)
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     else:
-        base = pathlib.Path(__file__).parent
+        base = Path(__file__).parent
     return str(base / relative)
 
 
-def get_logs_dir():
+def get_logs_dir() -> str:
     """
-    Retorna a pasta tmp fixa ao lado do main.py,
-    mesmo no Windows (exe) ou Linux.
+    Retorna a pasta tmp ao lado do script (dev) ou ao lado do exe / sys._MEIPASS (prod).
     """
-    # Base do executável OU do script Python
-    if hasattr(sys, "_MEIPASS"):
-        base = pathlib.Path(sys.executable).parent
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     else:
-        base = pathlib.Path(__file__).parent.parent  # sobe para /api
+        base = Path(__file__).parent  # /api
 
     tmp = base / "tmp"
-    tmp.mkdir(exist_ok=True)
+    tmp.mkdir(exist_ok=True, parents=True)
     return str(tmp)
