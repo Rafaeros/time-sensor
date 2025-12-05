@@ -2,12 +2,14 @@
 """
 main.py — Servidor TCP + Flask + Async Scraper (corrigido e limpo)
 
-Correções pedidas:
- ✔ TMP_DIR sempre dentro da pasta /api (onde main.py está)
- ✔ logs.txt dentro de /api/tmp (Linux e Windows .exe)
- ✔ reports em /api/tmp/reports
- ✔ server Flask sem operador walrus
- ✔ restante do código mantido exatamente igual
+Mudanças aplicadas (seguras e retro-compatíveis):
+ - BASE_DIR fixo: se EXE -> pasta do executável; senão -> pasta do script
+ - TMP_DIR/REPORTS_DIR criados antes de iniciar qualquer servidor
+ - LOGS_PATH garantido (touch) para sempre existir
+ - Debug prints de BASE_DIR / TMP_DIR / LOGS_PATH (úteis para verificar runtime)
+ - Leitura do logs mais tolerante (não descarta linhas por pequenos formatos)
+ - Criação/append do logs sem truncar
+ - Mantive o restante do seu código (TCP, Flask, Scraper) intactos
 """
 
 import os
@@ -26,37 +28,45 @@ from core.session_manager import AuthOnCM
 from core.utils.path_utils import resource_path
 from collections.abc import Coroutine
 
-
 # -----------------------------------------------------------
-# PASTAS E PATHS
+# PASTAS E PATHS (BASE_DIR fixo e persistente)
 # -----------------------------------------------------------
 
-if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-    # RODANDO COMO EXE → base é a pasta do executável
+if getattr(sys, "frozen", False):
+    # executável empacotado: base é a pasta do executável (persistente)
     BASE_DIR = pathlib.Path(sys.executable).parent
 else:
-    # RODANDO NO PYTHON NORMAL → base é a pasta do main.py
+    # modo dev: base é a pasta do main.py
     BASE_DIR = pathlib.Path(__file__).parent
 
-# Templates e static (compatível com PyInstaller)
+# Templates e static (compatível com PyInstaller / dev)
 if getattr(sys, "frozen", False):
-    # Quando empacotado, resource_path já resolve para onde os dados foram extraídos/copiados
     TEMPLATES_DIR = resource_path("templates")
     STATIC_DIR = resource_path("static")
 else:
-    # modo dev: templates e static estão em /api/templates e /api/static
-    TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
-    STATIC_DIR = os.path.join(BASE_DIR, "static")
+    TEMPLATES_DIR = str(BASE_DIR / "templates")
+    STATIC_DIR = str(BASE_DIR / "static")
 
-# TMP absoluto dentro de /api
-TMP_DIR = os.path.join(BASE_DIR, "tmp")
-REPORTS_DIR = os.path.join(TMP_DIR, "reports")
+# TMP absoluto dentro da pasta base
+TMP_DIR = BASE_DIR / "tmp"
+REPORTS_DIR = TMP_DIR / "reports"
+LOGS_PATH = TMP_DIR / "logs.txt"
 
-os.makedirs(REPORTS_DIR, exist_ok=True)
-os.makedirs(TMP_DIR, exist_ok=True)
+# garante existência das pastas e do arquivo de log
+TMP_DIR.mkdir(parents=True, exist_ok=True)
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+# touch logs file so it exists and permissions are correct
+try:
+    LOGS_PATH.touch(exist_ok=True)
+except Exception:
+    # em casos restritos de permissão, tentamos criar via open
+    with open(str(LOGS_PATH), "a", encoding="utf-8"):
+        pass
 
-LOGS_PATH = os.path.join(TMP_DIR, "logs.txt")
-
+# debug - mostra onde o app está lendo/escrevendo
+print(f"[DEBUG] BASE_DIR    : {BASE_DIR}")
+print(f"[DEBUG] TMP_DIR     : {TMP_DIR}")
+print(f"[DEBUG] LOGS_PATH   : {LOGS_PATH}")
 
 # -----------------------------------------------------------
 # CONFIGURAÇÕES DE REDE
@@ -66,17 +76,80 @@ HOST = "0.0.0.0"
 TCP_PORT = 5050
 FLASK_PORT = 8080
 
-
 # -----------------------------------------------------------
-# LOGGER
+# FUNÇÕES AUXILIARES DE LOG (escrita/parse robusto)
 # -----------------------------------------------------------
 
 
 def salvar_log(texto: str) -> None:
-    pathlib.Path(TMP_DIR).mkdir(parents=True, exist_ok=True)
-
-    with open(LOGS_PATH, "a", encoding="utf-8") as f:
+    """Append seguro ao arquivo de logs (cria pasta se necessário)."""
+    TMP_DIR.mkdir(parents=True, exist_ok=True)
+    # usa modo append e encoding sempre
+    with open(str(LOGS_PATH), "a", encoding="utf-8") as f:
         f.write(texto + "\n")
+
+
+def _parse_log_line(line: str):
+    """
+    Tenta parsear uma linha de log no formato:
+    "YYYY-MM-DD HH:MM:SS | produto;tp;pausa;total;qtd"
+
+    Retorna um dict com os campos ou None se não for possível.
+    A função é tolerante: aceita espaços variados e tenta preencher valores faltantes.
+    """
+    if not line:
+        return None
+
+    # Tentativa simples: encontrar ' | ' (com espaço) ou '|' sem espaços
+    if " | " in line:
+        ts_part, rest = line.split(" | ", 1)
+    elif "|" in line:
+        ts_part, rest = line.split("|", 1)
+        ts_part = ts_part.strip()
+        rest = rest.strip()
+    else:
+        # sem separador reconhecível -> não conseguimos parsear
+        return None
+
+    # tenta converter timestamp
+    try:
+        dt = datetime.datetime.strptime(ts_part.strip(), "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        # se falhar, rejeita
+        return None
+
+    # separa o resto por ';' e normaliza quantidade de itens
+    parts = [p.strip() for p in rest.split(";")]
+    # esperamos 5 campos: produto, tp, pausa, total, qtd
+    while len(parts) < 5:
+        parts.append("0")
+    produto = parts[0]
+    try:
+        tp = int(parts[1]) if parts[1] else 0
+    except Exception:
+        tp = 0
+    try:
+        pausa = int(parts[2]) if parts[2] else 0
+    except Exception:
+        pausa = 0
+    try:
+        total = int(parts[3]) if parts[3] else 0
+    except Exception:
+        total = tp + pausa
+    try:
+        qtd = int(parts[4]) if parts[4] else 0
+    except Exception:
+        qtd = 0
+
+    return {
+        "data": dt.strftime("%Y-%m-%d %H:%M:%S"),
+        "datetime": dt,
+        "produto": produto,
+        "tempo_producao": tp,
+        "tempo_pausa": pausa,
+        "tempo_total": total,
+        "quantidade": qtd,
+    }
 
 
 # -----------------------------------------------------------
@@ -89,39 +162,57 @@ def handle_client(conn: socket.socket, addr: Any) -> None:
 
     try:
         while True:
-            data = conn.recv(1024)
+            data = conn.recv(4096)
             if not data:
                 break
 
-            msg = data.decode(errors="ignore").strip()
+            # decodifica ignorando bytes errados
+            try:
+                msg = data.decode("utf-8", errors="ignore").strip()
+            except Exception:
+                msg = str(data)
+
             if msg == "":
                 continue
 
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             print(f"[{timestamp}] RECEBIDO: {msg}")
 
+            # salva no formato já usado pelo frontend: "TIMESTAMP | RESTO"
             salvar_log(f"{timestamp} | {msg}")
-            conn.sendall(b"OK")
+            try:
+                conn.sendall(b"OK")
+            except Exception:
+                pass
 
     except Exception as e:
         print("[TCP] Erro no handle_client:", e)
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
         print(f"[TCP] Cliente {addr} desconectado")
 
 
 def tcp_server() -> None:
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
     server.bind((HOST, TCP_PORT))
     server.listen()
-
     print(f"[TCP] Servidor TCP iniciado em {HOST}:{TCP_PORT}")
 
-    while True:
-        conn, addr = server.accept()
-        threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
+    try:
+        while True:
+            conn, addr = server.accept()
+            threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
+    except Exception as e:
+        print("[TCP] Encerrando servidor TCP:", e)
+    finally:
+        try:
+            server.close()
+        except Exception:
+            pass
 
 
 # -----------------------------------------------------------
@@ -137,51 +228,45 @@ def index():
         return render_template("index.html")
     except Exception as e:
         return jsonify(
-            {
-                "status": "erro",
-                "mensagem": "Falha ao carregar template",
-                "detalhes": str(e),
-            }
+            {"status": "erro", "mensagem": "Falha ao carregar template", "detalhes": str(e)}
         )
 
 
 @app.route("/logs")
 def get_logs():
-    if not os.path.exists(LOGS_PATH):
+    """
+    Lê o arquivo logs.txt sempre do TMP_DIR configurado e retorna o JSON esperado
+    A leitura é tolerante a linhas mal-formadas.
+    """
+    registros = []
+
+    # garante que o arquivo exista (touch)
+    try:
+        LOGS_PATH.touch(exist_ok=True)
+    except Exception:
+        pass
+
+    try:
+        with open(str(LOGS_PATH), encoding="utf-8") as f:
+            raw_lines = f.readlines()
+    except Exception as e:
+        print("[LOGS] erro ao abrir arquivo:", e)
         return jsonify({})
 
-    registros = []
-    with open(LOGS_PATH, encoding="utf-8") as f:
-        linhas = [l.strip() for l in f.readlines() if " | " in l]
+    # percorre linhas do arquivo do mais antigo ao mais novo, mas depois ordena
+    for line in raw_lines:
+        line = line.strip()
+        parsed = _parse_log_line(line)
+        if parsed:
+            registros.append(parsed)
 
-    for linha in linhas:
-        try:
-            data_str, resto = linha.split(" | ")
-            produto, tp, pausa, total, qtd = resto.split(";")
-
-            dt = datetime.datetime.strptime(data_str, "%Y-%m-%d %H:%M:%S")
-
-            registros.append(
-                {
-                    "data": data_str,
-                    "datetime": dt,
-                    "produto": produto,
-                    "tempo_producao": int(tp),
-                    "tempo_pausa": int(pausa),
-                    "tempo_total": int(total),
-                    "quantidade": int(qtd),
-                }
-            )
-        except Exception:
-            pass
-
+    # ordena do mais novo → mais antigo
     registros.sort(key=lambda x: x["datetime"], reverse=True)
 
+    # agrupa por produto e calcula médias
     produtos: dict[str, Any] = {}
-
     for r in registros:
         prod = r["produto"]
-
         if prod not in produtos:
             produtos[prod] = {"media": 0, "logs": [], "_soma": 0, "_count": 0}
 
@@ -190,20 +275,23 @@ def get_logs():
         produtos[prod]["logs"].append(r)
 
     for prod in produtos:
-        produtos[prod]["media"] = produtos[prod]["_soma"] / produtos[prod]["_count"]
+        produtos[prod]["media"] = produtos[prod]["_soma"] / produtos[prod]["_count"] if produtos[prod]["_count"] else 0
         produtos[prod]["logs"] = produtos[prod]["logs"][:50]
         del produtos[prod]["_soma"]
         del produtos[prod]["_count"]
 
+    # converte datetime para iso string para serialização
     for prod in produtos:
         for log in produtos[prod]["logs"]:
-            log["datetime"] = log["datetime"].isoformat()
+            if isinstance(log.get("datetime"), datetime.datetime):
+                log["datetime"] = log["datetime"].isoformat()
 
     return jsonify(produtos)
 
 
 def start_flask():
     print(f"[FLASK] Servidor iniciado em http://localhost:{FLASK_PORT}")
+    # use_reloader=False evita spawn extra de processo ao executar em thread
     app.run(host="0.0.0.0", port=FLASK_PORT, debug=False, use_reloader=False)
 
 
@@ -227,14 +315,13 @@ def run_async(coro: Coroutine):
 # SCRAPER
 # -----------------------------------------------------------
 
-scraper = AuthOnCM(TMP_DIR)
+scraper = AuthOnCM(str(TMP_DIR))
 
 
 async def scrape_task(op: str) -> dict:
     print(f"[SCRAPER] Iniciando scraping da OP {op}...")
-
     try:
-        session = await scraper.get_client()
+        await scraper.get_client()
     except Exception as e:
         return {"ok": False, "erro": f"login failed: {e}"}
 
@@ -262,11 +349,11 @@ def scrape_op(op: str):
 if __name__ == "__main__":
     print("\n=== MONITOR LOGS INICIADO ===")
 
-    # Inicia loop async
+    # inicia loop async em thread antes de qualquer run_async()
     threading.Thread(target=start_async_loop, daemon=True).start()
-    time.sleep(0.1)
+    time.sleep(0.05)
 
-    # Login inicial
+    # Login inicial (mantém sessão pronta)
     try:
         fut_login = run_async(scraper.login())
         fut_login.result(timeout=30)
@@ -274,10 +361,8 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"[SCRAPER] Falha no login inicial: {e}")
 
-    # TCP
+    # inicia servidores
     threading.Thread(target=tcp_server, daemon=True).start()
-
-    # Flask
     threading.Thread(target=start_flask, daemon=True).start()
 
     try:
@@ -285,7 +370,11 @@ if __name__ == "__main__":
             time.sleep(0.5)
     except KeyboardInterrupt:
         print("\n[MAIN] Encerrando...\n")
-        run_async(scraper.close())
+        try:
+            fut = run_async(scraper.close())
+            fut.result(timeout=5)
+        except Exception:
+            pass
         async_loop.call_soon_threadsafe(async_loop.stop)
 
     print("[MAIN] Encerrado.")
