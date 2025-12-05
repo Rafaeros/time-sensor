@@ -93,8 +93,9 @@ async function updateLogs() {
             let total = Number(log.tempo_total);
 
             // 🔥 Classes de cor baseadas no desempenho
-            let rowColor = total < media ? "bg-red-200" : "bg-green-200";
-            let totalColor = total < media ? "text-red-700 font-bold" : "text-green-700 font-bold";
+            let rowColor  = total <= media ? "bg-green-200" : "bg-red-200";
+            let totalColor = total <= media ? "text-green-700 font-bold" : "text-red-700 font-bold";
+
 
             tabelaHTML += `
                 <tr class="${rowColor}">
