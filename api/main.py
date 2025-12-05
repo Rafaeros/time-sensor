@@ -31,7 +31,12 @@ from collections.abc import Coroutine
 # PASTAS E PATHS
 # -----------------------------------------------------------
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # pasta /api
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    # RODANDO COMO EXE → base é a pasta do executável
+    BASE_DIR = pathlib.Path(sys.executable).parent
+else:
+    # RODANDO NO PYTHON NORMAL → base é a pasta do main.py
+    BASE_DIR = pathlib.Path(__file__).parent
 
 # Templates e static (compatível com PyInstaller)
 if getattr(sys, "frozen", False):
