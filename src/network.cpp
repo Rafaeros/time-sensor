@@ -1,153 +1,142 @@
-#include <Arduino.h>
 #include <WiFi.h>
+#include <ArduinoJson.h>
 #include "network.h"
 
-static WiFiClient client;
-static String _serverIP;
-static int _serverPort;
+WiFiClient client;
+String _ssid, _pass, _serverIP;
+int _serverPort;
+unsigned long _lastPing = 0;
+unsigned long _lastReconnectAttempt = 0;
 
-unsigned long lastReconnectAttempt = 0;
-
-// ------------------------
-//  Iniciar WiFi
-// ------------------------
-void networkInit(const char *ssid, const char *pass, const char *serverIP, int port)
-{
+void networkInit(const char* ssid, const char* pass, const char* serverIP, int port) {
+    _ssid = ssid;
+    _pass = pass;
     _serverIP = serverIP;
     _serverPort = port;
+    
+    Serial.println("--- INICIANDO REDE ---");
+    Serial.print("SSID Alvo: "); Serial.println(_ssid);
+    Serial.print("Server Alvo: "); Serial.print(_serverIP); Serial.print(":"); Serial.println(_serverPort);
 
-    Serial.println("[WiFi] Conectando...");
-    WiFi.begin(ssid, pass);
-
-    while (WiFi.status() != WL_CONNECTED)
-    {
-        delay(300);
-        Serial.print(".");
-    }
-
-    Serial.println("\n[WiFi] Conectado!");
-    Serial.print("IP: ");
-    Serial.println(WiFi.localIP());
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(_ssid.c_str(), _pass.c_str());
 }
 
-// ------------------------
-//  Reconectar WiFi
-// ------------------------
-void ensureWiFi()
-{
-    if (WiFi.status() == WL_CONNECTED)
+void networkLoop() {
+    if (WiFi.status() != WL_CONNECTED) {
+        unsigned long now = millis();
+        if (now - _lastReconnectAttempt > 5000) {
+            _lastReconnectAttempt = now;
+            Serial.print("[WiFi] Tentando reconectar ao SSID: ");
+            Serial.println(_ssid);
+            
+            WiFi.disconnect();
+            WiFi.reconnect();
+            WiFi.begin(_ssid.c_str(), _pass.c_str());
+        }
         return;
+    }
+    if (!client.connected()) {
+        unsigned long now = millis();
+        if (now - _lastReconnectAttempt > 3000) {
+            _lastReconnectAttempt = now;
+            
+            Serial.print("[WiFi] Conectado! IP Local: ");
+            Serial.println(WiFi.localIP());
+            Serial.print("[TCP] Tentando conectar ao Server: ");
+            Serial.println(_serverIP);
 
-    Serial.println("[WiFi] PERDEU A CONEXAO! Tentando voltar...");
+            if (client.connect(_serverIP.c_str(), _serverPort)) {
+                Serial.println("✅ [TCP] CONECTADO! Enviando Handshake...");
+                client.println("ID:" + WiFi.macAddress());
+                unsigned long start = millis();
+                while (!client.available() && millis() - start < 1000) delay(10);
+                while (client.available()) client.read();
+            } else {
+                Serial.println("❌ [TCP] Falha na conexão. Verifique IP e Firewall.");
+            }
+        }
+    } else {
+        if (millis() - _lastPing > 5000) {
+            _lastPing = millis();
+            client.println("PING");
+            while(client.available()) client.read();
+        }
+    }
+}
 
-    WiFi.disconnect();
-    WiFi.reconnect();
+bool isConnected() {
+    return WiFi.status() == WL_CONNECTED && client.connected();
+}
+
+OrderInfo requestOrderInfo() {
+    OrderInfo info = {0, ""};
+    
+    if (!isConnected()) return info;
+
+    while(client.available()) client.read(); 
+    
+    client.println("GET_ORDER");
 
     unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - start < 5000)
-    {
-        delay(200);
-        Serial.print(".");
+    while (!client.available()) {
+        if (millis() - start > 2000) return info;
+        delay(10);
     }
-
-    if (WiFi.status() == WL_CONNECTED)
-        Serial.println("\n[WiFi] Reconectado!");
+    
+    String resp = client.readStringUntil('\n');
+    resp.trim(); 
+    if (resp.startsWith("ORDER:")) {
+        int firstColon = resp.indexOf(':');
+        int secondColon = resp.indexOf(':', firstColon + 1);
+        
+        if (secondColon > 0) {
+            String idStr = resp.substring(firstColon + 1, secondColon);
+            String codeStr = resp.substring(secondColon + 1);
+            
+            info.id = idStr.toInt();
+            info.code = codeStr;
+        } else {
+            info.id = resp.substring(6).toInt();
+            info.code = "OP-" + String(info.id);
+        }
+    }
+    return info;
 }
 
-// ------------------------
-//  Reconectar TCP
-// ------------------------
-bool ensureTCP()
-{
-    if (client.connected())
-        return true;
+void sendStatus(String status) {
+    if (isConnected()) client.println("STATUS:" + status);
+}
 
-    Serial.println("[TCP] Desconectado! Tentando reconectar...");
+bool sendJsonLog(long orderId, double cycleTime, double pausedTime, int qtyProd, int qtyPaused) {
+    if (!isConnected()) return false;
+    while(client.available()) client.read();
 
-    client.stop();
-    delay(150);
+    JsonDocument doc;
+    doc["orderId"] = orderId;
+    doc["cycleTime"] = cycleTime;
+    doc["pausedTime"] = pausedTime;
+    doc["quantityProduced"] = qtyProd;
+    doc["quantityPaused"] = qtyPaused;
 
-    if (client.connect(_serverIP.c_str(), _serverPort, 2000))
-    {
-        Serial.println("[TCP] Reconectado!");
-        return true;
+    String jsonStr;
+    serializeJson(doc, jsonStr);
+    
+    client.println(jsonStr);
+    unsigned long start = millis();
+    while (millis() - start < 4000) {
+        
+        if (client.available()) {
+            String line = client.readStringUntil('\n');
+            line.trim();
+            if (line == "OK_LOG") {
+                return true; 
+            }
+            
+        }
+        delay(10);
     }
 
-    Serial.println("[TCP] Falha ao reconectar.");
+    Serial.println("Timeout esperando OK_LOG");
     return false;
-}
-
-// ------------------------
-//  Loop opcional (manutenção)
-// ------------------------
-void networkLoop()
-{
-    unsigned long now = millis();
-
-    if (now - lastReconnectAttempt >= 2000)
-    {
-        lastReconnectAttempt = now;
-        ensureWiFi();
-        ensureTCP();
-    }
-}
-
-// ------------------------
-//   Envio confiável
-// ------------------------
-void sendData(const char *codigo,
-              unsigned long tempoProd,
-              unsigned long tempoPause,
-              unsigned long tempoTotal,
-              int qtd)
-{
-    // ========== GARANTE WIFI ==========
-    ensureWiFi();
-    if (WiFi.status() != WL_CONNECTED)
-    {
-        Serial.println("[WiFi] Sem WiFi, não enviando.");
-        return;
-    }
-
-    // ========== GARANTE TCP ==========
-    if (!ensureTCP())
-    {
-        Serial.println("[TCP] Sem TCP, não enviando.");
-        return;
-    }
-
-    // ---------- Monta mensagem ----------
-    String msg =
-        String(codigo) + ";" +
-        tempoProd + ";" +
-        tempoPause + ";" +
-        tempoTotal + ";" +
-        qtd + "\n";
-
-    // ---------- Envia ----------
-    size_t enviado = client.write((const uint8_t *)msg.c_str(), msg.length());
-
-    if (enviado != msg.length())
-    {
-        Serial.println("[TCP] Erro ao enviar! Tentando reconectar...");
-
-        // PRIMEIRA TENTATIVA DE RECONECTAR
-        if (!ensureTCP())
-        {
-            Serial.println("[TCP] Falha no retry.");
-            return;
-        }
-
-        // SEGUNDA TENTATIVA DE ENVIO
-        enviado = client.write((const uint8_t *)msg.c_str(), msg.length());
-
-        if (enviado != msg.length())
-        {
-            Serial.println("[TCP] Falhou mesmo após reconectar!");
-            return;
-        }
-    }
-
-    Serial.print("[TCP] Enviado: ");
-    Serial.println(msg);
 }

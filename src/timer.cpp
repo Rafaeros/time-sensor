@@ -1,31 +1,39 @@
-#include <Arduino.h>
 #include "timer.h"
 
-static unsigned long startTime = 0;
-static unsigned long accumulated = 0;
-static bool active = false;
+Timer::Timer() {
+    startTime = 0;
+    accumulated = 0;
+    active = false;
+}
 
-void timerStart() {
+void Timer::start() {
     if (!active) {
-        startTime = millis() - accumulated;
+        startTime = millis();
         active = true;
     }
 }
 
-void timerPause() {
+void Timer::pause() {
     if (active) {
-        accumulated = millis() - startTime;
+        accumulated += (millis() - startTime);
         active = false;
     }
 }
 
-void timerReset() {
+void Timer::reset() {
     active = false;
     accumulated = 0;
+    startTime = 0;
 }
 
-unsigned long timerGetSeconds() {
-    if (active)
-        return (millis() - startTime) / 1000;
+void Timer::set(unsigned long seconds) {
+    accumulated = seconds * 1000;
+    active = false;
+}
+
+unsigned long Timer::getSeconds() {
+    if (active) {
+        return (accumulated + (millis() - startTime)) / 1000;
+    }
     return accumulated / 1000;
 }

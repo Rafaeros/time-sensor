@@ -1,157 +1,208 @@
 #include <Arduino.h>
-#include "leds.h"
-#include "timer.h"
 #include "network.h"
+#include "leds.h"
+#include "persistence.h"
+#include "display.h"
+#include "timer.h" 
 
-#define LED_R 4
-#define LED_G 5
-#define BUZZER_PIN 18
-#define SWITCH_PIN 27
-#define PAUSE_PIN 23
+#define PIN_SWITCH_PROD 46
+#define PIN_BTN_PAUSE   45
+#define PIN_LED_R       36  
+#define PIN_LED_G       37  
 
-// tempo mínimo para enviar (só envia se for maior que isso)
-const int TEMPO_LIMITE = 5;
+const char* SSID = "WIFI_SSID";
+const char* PASS = "WIFI_PASS";
+const char* IP   = "TCP_SERVER_IP"; 
+const int PORT   = 5050;
 
-// Flags e variáveis internas
-bool ultimoEstado = false;
-bool bipFeito = false;
+Timer prodTimer;  
+Timer pauseTimer; 
 
-unsigned long lastBlink = 0;
-bool blinkState = false;
+enum State { IDLE, RUNNING, PAUSED };
+State currentState = IDLE;
 
-unsigned long producaoStart = 0;
-unsigned long pausaStart = 0;
+long currentOrderId = 0;
+String currentOrderCode = "";
+int pauseCount = 0;
 
-unsigned long tempoProducao = 0;
-unsigned long tempoPausa = 0;
-
-void setup()
-{
+void setup() {
     Serial.begin(115200);
+    pinMode(PIN_SWITCH_PROD, INPUT_PULLUP); 
+    pinMode(PIN_BTN_PAUSE, INPUT_PULLUP);   
+    
+    ledsInit(PIN_LED_R, PIN_LED_G);
+    displayInit();
+    persistenceInit();
+    
+    MachineState saved = loadState();
+    bool switchOn = !digitalRead(PIN_SWITCH_PROD);
 
-    ledsInit(LED_R, LED_G);
-    pinMode(PAUSE_PIN, INPUT_PULLUP);
-    pinMode(SWITCH_PIN, INPUT_PULLUP);
-    pinMode(BUZZER_PIN, OUTPUT);
+    if (saved.active && switchOn) {
+        Serial.println("Recuperando...");
+        currentOrderId = saved.orderId;
+        currentOrderCode = "REC-" + String(currentOrderId);
+        pauseCount = saved.pauseCount;
+        
+        prodTimer.set((unsigned long)saved.prodTime);
+        pauseTimer.set((unsigned long)saved.pauseTime);
 
-    networkInit("", "", "", 5050);
+        bool isPauseHeld = !digitalRead(PIN_BTN_PAUSE);
+        
+        if (isPauseHeld) {
+            currentState = PAUSED;
+            pauseTimer.start();
+            setLedColor(LED_YELLOW);
+        } else {
+            currentState = RUNNING;
+            prodTimer.start();
+            setLedColor(LED_GREEN);
+            setBlink(true);
+        }
+    } else {
+        clearState();
+        currentState = IDLE;
+        setLedColor(LED_RED);
+    }
+    
+    updateStatus("Conectando WiFi", SSID);
+    networkInit(SSID, PASS, IP, PORT);
 }
 
-void loop()
-{
-    bool ativo = (digitalRead(SWITCH_PIN) == LOW);           // sensor ativo
-    bool pausePressionado = (digitalRead(PAUSE_PIN) == LOW); // botão de pausa
+void finalizeProduction() {
+    if (currentState == RUNNING) prodTimer.pause();
+    if (currentState == PAUSED) pauseTimer.pause();
 
-    // ======================================================
-    //  SENSOR DESATIVADO → FINALIZA CICLO E ENVIA TEMPOS
-    // ======================================================
-    if (!ativo)
-    {
-        setRGB(1, 0); // LED vermelho
-
-        // Finaliza tempos se estavam rolando
-        if (producaoStart > 0)
-            tempoProducao += (millis() - producaoStart);
-
-        if (pausaStart > 0)
-            tempoPausa += (millis() - pausaStart);
-
-        unsigned long tempoTotal = tempoProducao + tempoPausa;
-
-        if (tempoTotal > TEMPO_LIMITE * 1000)
-        {
-            // ======================================================
-            //  ENVIO COM VALIDAÇÃO DE CONEXÃO (não perde log)
-            // ======================================================
-            sendData(
-                "TKC110 002 002",
-                tempoProducao / 1000,
-                tempoPausa / 1000,
-                tempoTotal / 1000,
-                1
-            );
-            // O sendData() já:
-            // - verifica WiFi
-            // - verifica socket
-            // - reconecta automaticamente se falhar
-            // - tenta reenviar se for necessário
-        }
-
-        // Reset das variáveis
-        producaoStart = 0;
-        pausaStart = 0;
-        tempoProducao = 0;
-        tempoPausa = 0;
-        bipFeito = false;
-        ultimoEstado = false;
-
-        return;
-    }
-
-    // ======================================================
-    //  ATIVO + PAUSE → PISCAR LED E CONTAR PAUSA
-    // ======================================================
-    if (pausePressionado)
-    {
-        // Pausa produção
-        if (producaoStart > 0)
-        {
-            tempoProducao += (millis() - producaoStart);
-            producaoStart = 0;
-        }
-
-        // Inicia pausa
-        if (pausaStart == 0)
-            pausaStart = millis();
-
-        // Piscar LED vermelho / verde
-        if (millis() - lastBlink >= 300)
-        {
-            lastBlink = millis();
-            blinkState = !blinkState;
-
-            if (blinkState)
-                setRGB(1, 0);
-            else
-                setRGB(0, 1);
-        }
-
-        return;
-    }
-
-    // ======================================================
-    //  ATIVO SEM PAUSE → CONTAGEM DE PRODUÇÃO
-    // ======================================================
-
-    setRGB(0, 1); // LED verde
-
-    // Parar contagem de pausa se estava pausado
-    if (pausaStart > 0)
-    {
-        tempoPausa += (millis() - pausaStart);
-        pausaStart = 0;
-    }
-
-    // Inicia contagem de produção
-    if (producaoStart == 0)
-        producaoStart = millis();
-
-    // ---------- BIP NA TRANSIÇÃO ----------
-    if (ativo && !ultimoEstado && !bipFeito)
-    {
-        digitalWrite(BUZZER_PIN, HIGH);
+    updateStatus("Finalizando...", "Enviando Log");
+    
+    bool sent = sendJsonLog(currentOrderId, 
+                          (double)prodTimer.getSeconds(), 
+                          (double)pauseTimer.getSeconds(), 
+                          1, pauseCount);
+    
+    sendStatus("IDLE"); 
+    
+    clearState();
+    currentState = IDLE;
+    setBlink(false);
+    
+    if (sent) {
+        updateStatus("SUCESSO", "Log Salvo");
         delay(1000);
-        digitalWrite(BUZZER_PIN, LOW);
+    } else {
+        displayError("Erro Ack Server"); 
+        delay(2000);
+    }
+}
 
-        bipFeito = true;
+void loop() {
+    networkLoop();
+    ledsLoop();
+
+
+    bool switchOn = !digitalRead(PIN_SWITCH_PROD); 
+    bool isPauseHeld = !digitalRead(PIN_BTN_PAUSE);
+
+    if (currentState == IDLE) {
+        if (isConnected()) setLedColor(LED_GREEN);
+        else setLedColor(LED_RED);
     }
 
-    ultimoEstado = true;
+    switch (currentState) {
+        case IDLE:
+            if (switchOn) { 
+                if (!isConnected()) {
+                    displayError("Sem Rede!");
+                    delay(1000);
+                    break;
+                }
 
-    // Debug
-    Serial.print("Produção: ");
-    Serial.print((tempoProducao + (producaoStart ? millis() - producaoStart : 0)) / 1000);
-    Serial.print("s | Pausa: ");
-    Serial.print((tempoPausa + (pausaStart ? millis() - pausaStart : 0)) / 1000);
-    Serial.println("s");
+                updateStatus("Buscando OP...", "");
+                OrderInfo info = requestOrderInfo();
+                
+                if (info.id > 0) {
+                    currentOrderId = info.id;
+                    currentOrderCode = info.code; 
+                    
+                    currentState = RUNNING;
+                    prodTimer.reset(); pauseTimer.reset(); pauseCount = 0;
+                    if (isPauseHeld) {
+                        currentState = PAUSED;
+                        pauseTimer.start();
+                        sendStatus("PAUSED");
+                        setLedColor(LED_YELLOW);
+                        setBlink(false);
+                    } else {
+                        prodTimer.start(); 
+                        sendStatus("RUNNING");
+                        setLedColor(LED_GREEN);
+                        setBlink(true, 500);
+                    }
+                    MachineState ms = {true, currentOrderId, 0, 0, 0, (currentState == PAUSED)};
+                    saveState(ms);
+                } else {
+                     displayError("Sem OP Ativa");
+                     delay(2000);
+                }
+            }
+            break;
+
+        case RUNNING:
+            if (!switchOn) {
+                finalizeProduction();
+            }
+            else if (isPauseHeld) {
+                prodTimer.pause(); 
+                pauseTimer.start(); 
+                
+                currentState = PAUSED;
+                pauseCount++;
+                
+                sendStatus("PAUSED");
+                setBlink(false);
+                setLedColor(LED_YELLOW);
+                
+                MachineState ms = {true, currentOrderId, 
+                                   (double)prodTimer.getSeconds(), (double)pauseTimer.getSeconds(), 
+                                   pauseCount, true};
+                saveState(ms);
+            }
+            break;
+
+        case PAUSED:
+            if (!switchOn) {
+                finalizeProduction();
+            }
+            else if (!isPauseHeld) {
+                pauseTimer.pause(); 
+                prodTimer.start(); 
+                
+                currentState = RUNNING;
+                
+                sendStatus("RUNNING");
+                setLedColor(LED_GREEN);
+                setBlink(true);
+                
+                MachineState ms = {true, currentOrderId, 
+                                   (double)prodTimer.getSeconds(), (double)pauseTimer.getSeconds(), 
+                                   pauseCount, false};
+                saveState(ms);
+            }
+            break;
+    }
+
+    static unsigned long lastDisplayUpdate = 0;
+    if (millis() - lastDisplayUpdate > 500) {
+        lastDisplayUpdate = millis();
+        if (currentState == RUNNING) {
+            displayProduction(currentOrderCode, prodTimer.getSeconds(), 1); 
+        } else if (currentState == PAUSED) {
+            displayPaused(pauseTimer.getSeconds());
+        } else if (currentState == IDLE && isConnected()) {
+            updateStatus("PRONTO", "Aguardando...");
+        } else if (currentState == IDLE && !isConnected()) {
+            updateStatus("OFFLINE", "Verifique Rede");
+        }
+    }
+    
+    delay(50);
 }

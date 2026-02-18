@@ -1,16 +1,19 @@
 #ifndef NETWORK_H
 #define NETWORK_H
+#include <Arduino.h>
+
+struct OrderInfo {
+    long id;
+    String code;
+};
 
 void networkInit(const char* ssid, const char* pass, const char* serverIP, int port);
 void networkLoop();
+bool isConnected();
 
-void sendData(const char* codigo,
-              unsigned long tempoProd,
-              unsigned long tempoPause,
-              unsigned long tempoTotal,
-              int qtd);
+OrderInfo requestOrderInfo(); 
 
-void ensureWiFi();
-bool ensureTCP();
+void sendStatus(String status);
+bool sendJsonLog(long orderId, double cycleTime, double pausedTime, int qtyProd, int qtyPaused);
 
 #endif
