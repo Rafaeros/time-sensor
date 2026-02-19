@@ -9,7 +9,7 @@
 #define PIN_BTN_PAUSE   45
 #define PIN_LED_R       36  
 #define PIN_LED_G       37  
-
+#define PIN_BUZZER      48
 const char* SSID = "WIFI_SSID";
 const char* PASS = "WIFI_PASS";
 const char* IP   = "TCP_SERVER_IP"; 
@@ -25,10 +25,17 @@ long currentOrderId = 0;
 String currentOrderCode = "";
 int pauseCount = 0;
 
+bool isLongBeeping = false;
+unsigned long longBeepStartTime = 0;
+unsigned long rapidBeepTimer = 0;
+bool rapidBeepState = false;
+
 void setup() {
     Serial.begin(115200);
     pinMode(PIN_SWITCH_PROD, INPUT_PULLUP); 
     pinMode(PIN_BTN_PAUSE, INPUT_PULLUP);   
+    pinMode(PIN_BUZZER, OUTPUT);
+    digitalWrite(PIN_BUZZER, LOW); 
     
     ledsInit(PIN_LED_R, PIN_LED_G);
     displayInit();
@@ -97,7 +104,24 @@ void finalizeProduction() {
 void loop() {
     networkLoop();
     ledsLoop();
-
+    if (isLongBeeping) {
+        if (millis() - longBeepStartTime < 2000) {
+            digitalWrite(PIN_BUZZER, HIGH);
+        } else {
+            digitalWrite(PIN_BUZZER, LOW);
+            isLongBeeping = false;
+        }
+    } 
+    else if (!isConnected()) {
+        if (millis() - rapidBeepTimer > 150) {
+            rapidBeepTimer = millis();
+            rapidBeepState = !rapidBeepState;
+            digitalWrite(PIN_BUZZER, rapidBeepState ? HIGH : LOW);
+        }
+    } 
+    else {
+        digitalWrite(PIN_BUZZER, LOW);
+    }
 
     bool switchOn = !digitalRead(PIN_SWITCH_PROD); 
     bool isPauseHeld = !digitalRead(PIN_BTN_PAUSE);
@@ -125,6 +149,9 @@ void loop() {
                     
                     currentState = RUNNING;
                     prodTimer.reset(); pauseTimer.reset(); pauseCount = 0;
+                    isLongBeeping = true;
+                    longBeepStartTime = millis();
+
                     if (isPauseHeld) {
                         currentState = PAUSED;
                         pauseTimer.start();
