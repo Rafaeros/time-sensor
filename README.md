@@ -1,4 +1,4 @@
-# 🏭 Monitoramento de Produção com Heltec V3
+# 🏭 Monitoramento de Produção com Heltec ESP32 V3
 
 Sistema de controle de produção e pausa com envio de dados via TCP
 
@@ -59,56 +59,73 @@ O Heltec V3 envia os seguintes campos:
 
 ```mermaid
 
-graph TD
+graph TB
 
-    subgraph HELTEC_V3[Heltec WiFi LoRa 32 V3]
-        direction TB
-        
-        VIN[5V]
-        GND[GND]
-        GPIO46[GPIO 46]
-        GPIO45[GPIO 45]
+    %% =========================
+    %% PLACA HELTEC V3 (Top View)
+    %% =========================
+    subgraph BOARD[Heltec WiFi LoRa 32 V3 - Vista Superior]
 
-        %% LEDs lado a lado
-        subgraph LED_PINS[GPIOs LED RGB]
-            direction LR
+        direction LR
+
+        %% Lado esquerdo (Entradas)
+        subgraph LEFT[Entradas]
+            direction TB
+            GPIO46[GPIO 46<br/>SW_PROD]
+            GPIO45[GPIO 45<br/>BTN_PAUSE]
+        end
+
+        %% Centro (Core)
+        subgraph CENTER[ESP32 Core]
+            direction TB
+            MCU[ESP32]
+        end
+
+        %% Lado direito (LED RGB)
+        subgraph RIGHT[Saídas LED RGB]
+            direction TB
             GPIO36[GPIO 36 - R]
             GPIO37[GPIO 37 - G]
             GPIO35[GPIO 35 - B]
         end
 
-        GPIO48[GPIO 48]
     end
 
+    %% Parte superior (Alimentação)
     PSU[Fonte 5V]
+    VIN[5V]
+    GND[GND]
+
+    PSU -->|5V| VIN
+    PSU --> GND
+
+    %% Conexões externas
     Switch[Chave Produção]
     PauseBtn[Botão Pausa]
 
-    LEDR[LED RGB - Vermelho]
-    LEDG[LED RGB - Verde]
-    LEDB[LED RGB - Azul]
+    LEDR[LED Vermelho]
+    LEDG[LED Verde]
+    LEDB[LED Azul]
 
-    R1[Resistor 1kΩ]
-    R2[Resistor 1kΩ]
-    R3[Resistor 1kΩ]
+    R1[1kΩ]
+    R2[1kΩ]
+    R3[1kΩ]
 
-    Buzzer[Buzzer Ativo]
-
-    %% Alimentação
-    PSU -->|5V| VIN
-    PSU --> GND
+    Buzzer[Buzzer]
+    GPIO48[GPIO 48]
 
     %% Entradas
     GPIO46 -->|INPUT_PULLUP| Switch --> GND
     GPIO45 -->|INPUT_PULLUP| PauseBtn --> GND
 
-    %% LED RGB com resistores
+    %% LEDs com resistores
     GPIO36 --> R1 --> LEDR --> GND
     GPIO37 --> R2 --> LEDG --> GND
     GPIO35 --> R3 --> LEDB --> GND
 
     %% Buzzer
     GPIO48 --> Buzzer --> GND
+
 
     
 ```
