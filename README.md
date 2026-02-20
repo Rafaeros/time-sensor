@@ -5,17 +5,21 @@ Sistema de controle de produção e pausa com envio de dados via TCP
 Este projeto utiliza um Heltec V3 para monitorar o ciclo de produção de uma máquina ou posto de trabalho.
 Ele contabiliza automaticamente a ordem de produção, tempo de produção, o tempo de pausa, quantidade de pausas e o tempo total, enviando essas informações para um servidor via TCP/IP.
 
-O dispositivo possui:
+Materiais necessários:
 
-🚦 LED RGB (VM/VD/AM/AZ) para indicar os status
+🚦 1 un. - Led RGB Alto Brilho 5mm - Cátodo Comum 
 
-🔊 Buzzer para sinal sonoro até conexão com servidor e iniciar a contagem de tempo.
+⚡️ 3 un. - Resistor 1KΩ
 
-🎛️ Chave principal (liga/desliga do ciclo de produção)
+🔊 1 un. - Buzzer Piezo (EPI-2412A-3312L)
 
-⏸️ Botão de pausa
+🎛️ 1 un. - Chave principal (Chave Microswitch 3 Pinos P/ Fio C/ Alavanca (D2F-01FL-D)
 
-🌐 Envio de dados para servidor SOCKET TCP
+⏸️ 1 un. - Botão de pausa (Botão On Off PBS-11A / Chave Push Button3A com Trava)
+
+📱 1 un. - Heltec ESP32 V3
+
+📦 1 un. - Caixa Patola PB107-PR
 
 <hr/>
 
@@ -25,8 +29,8 @@ O dispositivo possui:
 
 - Vermelho fixo → Desconectado do Servidor
 - Verde fixo → Aguardando (Conectado)
-- Azul fixo → Produzindo (Chave Principal Acionada)
-- Amarelo fixo → Pausado
+- Azul piscando → Produzindo (Chave Principal Acionada)
+- Amarelo piscando → Pausado
 
 <hr/>
 
@@ -144,9 +148,9 @@ graph TB
 
 3. Execute o servidor TCP na máquina destino (porta 5050 por padrão)
 
-4. Inicie o ciclo com a chave → LED verde piscando
+4. Inicie o ciclo com a chave → LED Azul piscando
 
-5. Pressione o botão de pausa → LED amarelo piscando
+5. Pressione o botão de pausa → LED Amarelo Piscando
 
 6. Desligue a chave → O heltec envia os tempos automaticamente
 
