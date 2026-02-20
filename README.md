@@ -1,3 +1,5 @@
+![Licença](https://img.shields.io/badge/Licen%C3%A7a-Comercial_Restrita-red)
+
 # 🏭 Monitoramento de Produção com Heltec ESP32 V3
 
 Sistema de controle de produção e pausa com envio de dados via TCP
@@ -155,3 +157,7 @@ graph TB
 6. Desligue a chave → O heltec envia os tempos automaticamente
 
 <hr/>
+
+## 📄 Licença
+
+Este projeto está sob a Licença de Uso Não-Comercial Rafaeros. Consulte o arquivo [LICENSE](LICENSE) para obter os detalhes completos sobre os termos de uso e as restrições para fins lucrativos.
