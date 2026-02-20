@@ -1,25 +1,24 @@
 #include <Arduino.h>
 #include "leds.h"
 
-int _pinR, _pinG;
+int _pinR, _pinG, _pinB;
 bool _blinking = false;
 int _blinkInterval = 500;
 unsigned long _lastBlink = 0;
 bool _ledOn = true;
 LedState _currentColor = LED_OFF;
 
-void ledsInit(int pinR, int pinG) {
-    _pinR = pinR; _pinG = pinG;
-    pinMode(_pinR, OUTPUT); pinMode(_pinG, OUTPUT);
+void ledsInit(int pinR, int pinG, int pinB) {
+    _pinR = pinR; _pinG = pinG; _pinB = pinB;
+    pinMode(_pinR, OUTPUT); pinMode(_pinG, OUTPUT); pinMode(_pinB, OUTPUT);
 }
 
 void applyColor(LedState color) {
-    // Ajuste HIGH/LOW dependendo se for Catodo ou Anodo Comum
-    // Assumindo CATODO COMUM (GND comum, HIGH acende)
+    // Lógica para CATODO COMUM (HIGH acende)
     digitalWrite(_pinR, (color == LED_RED || color == LED_YELLOW) ? HIGH : LOW);
     digitalWrite(_pinG, (color == LED_GREEN || color == LED_YELLOW) ? HIGH : LOW);
+    digitalWrite(_pinB, (color == LED_BLUE) ? HIGH : LOW);
 }
-
 void setLedColor(LedState color) {
     _currentColor = color;
     if (!_blinking) applyColor(_currentColor);

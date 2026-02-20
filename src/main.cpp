@@ -9,10 +9,12 @@
 #define PIN_BTN_PAUSE   45
 #define PIN_LED_R       36  
 #define PIN_LED_G       37  
+#define PIN_LED_B       42  
 #define PIN_BUZZER      48
-const char* SSID = "WIFI_SSID";
-const char* PASS = "WIFI_PASS";
-const char* IP   = "TCP_SERVER_IP"; 
+
+const char* SSID = "LANX CABLES";
+const char* PASS = "Lanx@2029";
+const char* IP   = "10.48.0.188"; 
 const int PORT   = 5050;
 
 Timer prodTimer;  
@@ -27,8 +29,22 @@ int pauseCount = 0;
 
 bool isLongBeeping = false;
 unsigned long longBeepStartTime = 0;
-unsigned long rapidBeepTimer = 0;
-bool rapidBeepState = false;
+
+unsigned long lastAutoSave = 0;
+const unsigned long AUTO_SAVE_INTERVAL = 180000; 
+
+void forceStateSave(bool activeStatus) {
+    MachineState ms = {
+        activeStatus, 
+        currentOrderId, 
+        currentOrderCode,
+        (double)prodTimer.getSeconds(), 
+        (double)pauseTimer.getSeconds(), 
+        pauseCount, 
+        (currentState == PAUSED)
+    };
+    saveState(ms);
+}
 
 void setup() {
     Serial.begin(115200);
@@ -37,17 +53,25 @@ void setup() {
     pinMode(PIN_BUZZER, OUTPUT);
     digitalWrite(PIN_BUZZER, LOW); 
     
-    ledsInit(PIN_LED_R, PIN_LED_G);
+    ledsInit(PIN_LED_R, PIN_LED_G, PIN_LED_B);
     displayInit();
     persistenceInit();
+    
+    updateStatus("Conectando WiFi", SSID);
+    networkInit(SSID, PASS, IP, PORT);
+
+    unsigned long startAttempt = millis();
+    while (!isConnected() && millis() - startAttempt < 15000) {
+        networkLoop();
+        delay(100);
+    }
     
     MachineState saved = loadState();
     bool switchOn = !digitalRead(PIN_SWITCH_PROD);
 
     if (saved.active && switchOn) {
-        Serial.println("Recuperando...");
         currentOrderId = saved.orderId;
-        currentOrderCode = "REC-" + String(currentOrderId);
+        currentOrderCode = saved.orderCode.length() > 0 ? saved.orderCode : "OFFLINE-REC";
         pauseCount = saved.pauseCount;
         
         prodTimer.set((unsigned long)saved.prodTime);
@@ -58,21 +82,14 @@ void setup() {
         if (isPauseHeld) {
             currentState = PAUSED;
             pauseTimer.start();
-            setLedColor(LED_YELLOW);
         } else {
             currentState = RUNNING;
             prodTimer.start();
-            setLedColor(LED_GREEN);
-            setBlink(true);
         }
     } else {
         clearState();
         currentState = IDLE;
-        setLedColor(LED_RED);
     }
-    
-    updateStatus("Conectando WiFi", SSID);
-    networkInit(SSID, PASS, IP, PORT);
 }
 
 void finalizeProduction() {
@@ -81,29 +98,37 @@ void finalizeProduction() {
 
     updateStatus("Finalizando...", "Enviando Log");
     
-    bool sent = sendJsonLog(currentOrderId, 
-                          (double)prodTimer.getSeconds(), 
-                          (double)pauseTimer.getSeconds(), 
-                          1, pauseCount);
-    
-    sendStatus("IDLE"); 
-    
-    clearState();
-    currentState = IDLE;
-    setBlink(false);
-    
-    if (sent) {
-        updateStatus("SUCESSO", "Log Salvo");
-        delay(1000);
+    if (isConnected()) {
+        bool sent = sendJsonLog(currentOrderId, 
+                              (double)prodTimer.getSeconds(), 
+                              (double)pauseTimer.getSeconds(), 
+                              1, pauseCount);
+        
+        if (sent) {
+            updateStatus("SUCESSO", "Log Salvo");
+            clearState();
+            delay(1000);
+        } else {
+            displayError("Erro Ack Server"); 
+            enqueueOfflineLog(currentOrderId, (double)prodTimer.getSeconds(), (double)pauseTimer.getSeconds(), pauseCount);
+            clearState(); 
+            delay(2000);
+        }
     } else {
-        displayError("Erro Ack Server"); 
+        displayError("Offline - Na Fila");
+        enqueueOfflineLog(currentOrderId, (double)prodTimer.getSeconds(), (double)pauseTimer.getSeconds(), pauseCount);
+        clearState(); 
         delay(2000);
     }
+    
+    if (isConnected()) sendStatus("IDLE"); 
+    currentState = IDLE;
 }
 
 void loop() {
     networkLoop();
     ledsLoop();
+    
     if (isLongBeeping) {
         if (millis() - longBeepStartTime < 2000) {
             digitalWrite(PIN_BUZZER, HIGH);
@@ -111,65 +136,105 @@ void loop() {
             digitalWrite(PIN_BUZZER, LOW);
             isLongBeeping = false;
         }
-    } 
-    else if (!isConnected()) {
-        if (millis() - rapidBeepTimer > 150) {
-            rapidBeepTimer = millis();
-            rapidBeepState = !rapidBeepState;
-            digitalWrite(PIN_BUZZER, rapidBeepState ? HIGH : LOW);
-        }
-    } 
-    else {
+    } else {
         digitalWrite(PIN_BUZZER, LOW);
     }
 
     bool switchOn = !digitalRead(PIN_SWITCH_PROD); 
     bool isPauseHeld = !digitalRead(PIN_BTN_PAUSE);
+    
+    int pendingLogs = getOfflineLogCount();
+    bool isFlushing = (currentState == IDLE && isConnected() && pendingLogs > 0);
 
-    if (currentState == IDLE) {
-        if (isConnected()) setLedColor(LED_GREEN);
-        else setLedColor(LED_RED);
+    if (isFlushing) {
+        setLedColor(LED_BLUE);
+        setBlink(true, 200); 
+    } else if (!isConnected()) {
+        setLedColor(LED_RED);
+        setBlink(currentState != IDLE, 500); 
+    } else {
+        if (currentState == IDLE) {
+            setLedColor(LED_GREEN);
+            setBlink(false);
+        } else if (currentState == RUNNING) {
+            setLedColor(LED_BLUE);
+            setBlink(true, 500);
+        } else if (currentState == PAUSED) {
+            setLedColor(LED_YELLOW);
+            setBlink(true, 500);
+        }
+    }
+
+    if (isFlushing) {
+        updateStatus("Fazendo Flush", String(pendingLogs) + " pendentes");
+        
+        OfflineLog nextLog = peekOfflineLog();
+        if (nextLog.valid) {
+            bool sent = sendJsonLog(nextLog.orderId, nextLog.prodTime, nextLog.pauseTime, 1, nextLog.pauseCount);
+            if (sent) {
+                popOfflineLog(); 
+                delay(500); 
+            } else {
+                displayError("Erro no Flush");
+                delay(2000); 
+            }
+        } else {
+            popOfflineLog(); 
+        }
     }
 
     switch (currentState) {
         case IDLE:
             if (switchOn) { 
-                if (!isConnected()) {
-                    displayError("Sem Rede!");
-                    delay(1000);
+                if (isFlushing) {
+                    displayError("Aguarde Flush!");
+                    delay(1500);
                     break;
                 }
 
                 updateStatus("Buscando OP...", "");
-                OrderInfo info = requestOrderInfo();
                 
-                if (info.id > 0) {
-                    currentOrderId = info.id;
-                    currentOrderCode = info.code; 
-                    
-                    currentState = RUNNING;
-                    prodTimer.reset(); pauseTimer.reset(); pauseCount = 0;
-                    isLongBeeping = true;
-                    longBeepStartTime = millis();
-
-                    if (isPauseHeld) {
-                        currentState = PAUSED;
-                        pauseTimer.start();
-                        sendStatus("PAUSED");
-                        setLedColor(LED_YELLOW);
-                        setBlink(false);
+                if (isConnected()) {
+                    OrderInfo info = requestOrderInfo();
+                    if (info.id > 0) {
+                        currentOrderId = info.id;
+                        currentOrderCode = info.code; 
                     } else {
-                        prodTimer.start(); 
-                        sendStatus("RUNNING");
-                        setLedColor(LED_GREEN);
-                        setBlink(true, 500);
+                        displayError("Sem OP Ativa");
+                        delay(2000);
+                        break;
                     }
-                    MachineState ms = {true, currentOrderId, 0, 0, 0, (currentState == PAUSED)};
-                    saveState(ms);
                 } else {
-                     displayError("Sem OP Ativa");
-                     delay(2000);
+                    MachineState lastKnown = loadState();
+                    if (lastKnown.orderId > 0) {
+                        currentOrderId = lastKnown.orderId;
+                        currentOrderCode = lastKnown.orderCode;
+                    } else {
+                        displayError("Sem Rede e Sem OP");
+                        delay(2000);
+                        break;
+                    }
                 }
+                
+                prodTimer.reset(); 
+                pauseTimer.reset(); 
+                isLongBeeping = true;
+                longBeepStartTime = millis();
+
+                if (isPauseHeld) {
+                    currentState = PAUSED;
+                    pauseCount = 1; 
+                    pauseTimer.start();
+                    if (isConnected()) sendStatus("PAUSED");
+                } else {
+                    currentState = RUNNING;
+                    pauseCount = 0;
+                    prodTimer.start(); 
+                    if (isConnected()) sendStatus("RUNNING");
+                }
+                
+                forceStateSave(true);
+                lastAutoSave = millis();
             }
             break;
 
@@ -180,18 +245,13 @@ void loop() {
             else if (isPauseHeld) {
                 prodTimer.pause(); 
                 pauseTimer.start(); 
-                
                 currentState = PAUSED;
                 pauseCount++;
                 
-                sendStatus("PAUSED");
-                setBlink(false);
-                setLedColor(LED_YELLOW);
+                if (isConnected()) sendStatus("PAUSED");
                 
-                MachineState ms = {true, currentOrderId, 
-                                   (double)prodTimer.getSeconds(), (double)pauseTimer.getSeconds(), 
-                                   pauseCount, true};
-                saveState(ms);
+                forceStateSave(true);
+                lastAutoSave = millis();
             }
             break;
 
@@ -202,32 +262,39 @@ void loop() {
             else if (!isPauseHeld) {
                 pauseTimer.pause(); 
                 prodTimer.start(); 
-                
                 currentState = RUNNING;
                 
-                sendStatus("RUNNING");
-                setLedColor(LED_GREEN);
-                setBlink(true);
+                if (isConnected()) sendStatus("RUNNING");
                 
-                MachineState ms = {true, currentOrderId, 
-                                   (double)prodTimer.getSeconds(), (double)pauseTimer.getSeconds(), 
-                                   pauseCount, false};
-                saveState(ms);
+                forceStateSave(true);
+                lastAutoSave = millis();
             }
             break;
+    }
+
+    if ((currentState == RUNNING || currentState == PAUSED) && (millis() - lastAutoSave > AUTO_SAVE_INTERVAL)) {
+        forceStateSave(true);
+        lastAutoSave = millis();
     }
 
     static unsigned long lastDisplayUpdate = 0;
     if (millis() - lastDisplayUpdate > 500) {
         lastDisplayUpdate = millis();
+        
         if (currentState == RUNNING) {
             displayProduction(currentOrderCode, prodTimer.getSeconds(), 1); 
         } else if (currentState == PAUSED) {
             displayPaused(pauseTimer.getSeconds());
-        } else if (currentState == IDLE && isConnected()) {
-            updateStatus("PRONTO", "Aguardando...");
-        } else if (currentState == IDLE && !isConnected()) {
-            updateStatus("OFFLINE", "Verifique Rede");
+        } else if (currentState == IDLE && !isFlushing) {
+            if (isConnected()) {
+                updateStatus("PRONTO", "Aguardando...");
+            } else {
+                if (pendingLogs > 0) {
+                    updateStatus("OFFLINE", String(pendingLogs) + " na fila");
+                } else {
+                    updateStatus("OFFLINE", "Aguardando Rede...");
+                }
+            }
         }
     }
     
