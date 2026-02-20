@@ -132,6 +132,10 @@ graph TB
 
 <hr/>
 
+![Heltec](images/pinout.png)
+
+<hr/>
+
 ### 🚀 Como Usar
 
 1. Configure os dados do Wi-Fi no main.cpp
