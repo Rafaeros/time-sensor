@@ -14,11 +14,34 @@ void ledsInit(int pinR, int pinG, int pinB) {
 }
 
 void applyColor(LedState color) {
-    // Lógica para CATODO COMUM (HIGH acende)
-    digitalWrite(_pinR, (color == LED_RED || color == LED_YELLOW) ? HIGH : LOW);
-    digitalWrite(_pinG, (color == LED_GREEN || color == LED_YELLOW) ? HIGH : LOW);
-    digitalWrite(_pinB, (color == LED_BLUE) ? HIGH : LOW);
+    int r = 0, g = 0, b = 0;
+
+    switch(color) {
+        case LED_RED:
+            r = 255; g = 0; b = 0;
+            break;
+        case LED_GREEN:
+            r = 0; g = 255; b = 0;
+            break;
+        case LED_BLUE:
+            r = 0; g = 0; b = 255;
+            break;
+        case LED_YELLOW:
+            r = 255;
+            g = 25;
+            b = 0;
+            break;
+        case LED_OFF:
+        default:
+            r = 0; g = 0; b = 0;
+            break;
+    }
+
+    analogWrite(_pinR, r);
+    analogWrite(_pinG, g);
+    analogWrite(_pinB, b);
 }
+
 void setLedColor(LedState color) {
     _currentColor = color;
     if (!_blinking) applyColor(_currentColor);

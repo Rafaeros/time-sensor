@@ -5,11 +5,11 @@
 #include "display.h"
 #include "timer.h"
 
-#define PIN_SWITCH_PROD 25
-#define PIN_BTN_PAUSE 26
+#define PIN_SWITCH_PROD 26
+#define PIN_BTN_PAUSE 25
 #define PIN_LED_R 14
-#define PIN_LED_G 12
-#define PIN_LED_B 13
+#define PIN_LED_G 13
+#define PIN_LED_B 12
 #define PIN_BUZZER 27
 
 const char *SSID = "WIFI_SSID";
@@ -120,6 +120,19 @@ void finalizeProduction()
         prodTimer.pause();
     if (currentState == PAUSED)
         pauseTimer.pause();
+
+    if (prodTimer.getSeconds() < 10)
+    {
+        updateStatus("CANCELADO", "Tempo curto (<10s)");
+        clearState();
+        delay(2000);
+        
+        if (isConnected())
+            sendStatus("IDLE");
+        currentState = IDLE;
+        return;
+    }
+    // -----------------------
 
     updateStatus("Finalizando...", "Enviando Log");
 
