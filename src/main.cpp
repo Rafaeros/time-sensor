@@ -132,7 +132,6 @@ void finalizeProduction()
         currentState = IDLE;
         return;
     }
-    // -----------------------
 
     updateStatus("Finalizando...", "Enviando Log");
 
@@ -216,16 +215,11 @@ void loop()
         setLedColor(LED_BLUE);
         setBlink(true, 200);
     }
-    else if (!currentConnection)
-    {
-        setLedColor(LED_RED);
-        setBlink(currentState != IDLE, 500);
-    }
     else
     {
         if (currentState == IDLE)
         {
-            setLedColor(LED_GREEN);
+            setLedColor(currentConnection ? LED_GREEN : LED_RED);
             setBlink(false);
         }
         else if (currentState == RUNNING)
