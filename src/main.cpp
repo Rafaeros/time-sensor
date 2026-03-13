@@ -5,8 +5,8 @@
 #include "display.h"
 #include "timer.h"
 
-#define PIN_SWITCH_PROD 26
-#define PIN_BTN_PAUSE 25
+#define PIN_SWITCH_PROD 25
+#define PIN_BTN_PAUSE 26
 #define PIN_LED_R 14
 #define PIN_LED_G 13
 #define PIN_LED_B 12
