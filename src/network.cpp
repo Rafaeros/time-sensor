@@ -1,146 +1,207 @@
-#include <WiFi.h>
-#include <ArduinoJson.h>
 #include "network.h"
+#include <WiFi.h>
+#include <esp_now.h>
+#include <esp_wifi.h> // Low-level Wi-Fi control
 
-WiFiClient client;
-String _ssid, _pass, _serverIP;
-int _serverPort;
-unsigned long _lastPing = 0;
-unsigned long _lastWifiAttempt = 0;
-unsigned long _lastTcpAttempt = 0;
+// Gateway MAC address (Receiver ESP32)
+uint8_t gatewayAddress[6];
 
-void networkInit(const char* ssid, const char* pass, const char* serverIP, int port) {
-    _ssid = ssid;
-    _pass = pass;
-    _serverIP = serverIP;
-    _serverPort = port;
+// ESP-NOW supports up to 250 bytes. Defining 2 message types:
+#define MSG_TYPE_CMD 0  // Text and Commands (GET_ORDER, STATUS, OK_LOG)
+#define MSG_TYPE_LOG 1  // Production data (Binary structs)
+
+typedef struct {
+    uint8_t type;
+    char text[100]; 
+} CommandMessage;
+
+typedef struct {
+    uint8_t type;
+    long orderId;
+    float cycleTime;
+    float pausedTime;
+    int qtyProd;
+    int qtyPaused;
+} LogMessage;
+
+// Volatile variables for radio interrupt handling
+volatile bool _radioReady = false;
+volatile bool _ackReceived = false;
+volatile bool _orderReceived = false;
+volatile bool _pongReceived = false;
+OrderInfo _lastReceivedOrder = {0, ""};
+
+// Callback for data sent (Antenna delivery confirmation)
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+    // Real confirmation comes from server response message
+}
+
+void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+    uint8_t msgType = incomingData[0]; // First byte denotes message type
+
+    if (msgType == MSG_TYPE_CMD) {
+        CommandMessage cmd;
+        memcpy(&cmd, incomingData, sizeof(cmd));
+        
+        // Convert to String and trim line endings from backend
+        String text = String(cmd.text);
+        text.trim(); 
+        
+        if (text == "OK_LOG") {
+            _ackReceived = true; // Servidor confirmou que gravou no Banco!
+        }
+        else if (text == "OK_PONG") {
+            _pongReceived = true; // Server responded to PING
+        }
+        else if (text.startsWith("ORDER:")) {
+            int firstColon = text.indexOf(':');
+            int secondColon = text.indexOf(':', firstColon + 1);
+            
+            if (secondColon > 0) {
+                _lastReceivedOrder.id = text.substring(firstColon + 1, secondColon).toInt();
+                _lastReceivedOrder.code = text.substring(secondColon + 1);
+            } else {
+                _lastReceivedOrder.id = text.substring(6).toInt();
+                _lastReceivedOrder.code = "OP-" + String(_lastReceivedOrder.id);
+            }
+            _orderReceived = true; // Order received successfully
+        }
+    }
+}
+
+void networkInit(uint8_t *gatewayMac) {
+    Serial.println("--- STARTING ESP-NOW RADIO ---");
     
-    Serial.println("--- INICIANDO REDE ---");
-    Serial.print("SSID Alvo: "); Serial.println(_ssid);
-    Serial.print("Server Alvo: "); Serial.print(_serverIP); Serial.print(":"); Serial.println(_serverPort);
+    // Copy Gateway MAC to memory
+    memcpy(gatewayAddress, gatewayMac, 6);
 
+    // Set Wi-Fi to Station mode without connecting to any AP
     WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true); // Deixa o ESP32 gerenciar quedas rápidas
-    WiFi.begin(_ssid.c_str(), _pass.c_str());
+    WiFi.disconnect();
+
+    // --- FORCE CHANNEL 1 TO AVOID CONFLICTS ---
+    esp_wifi_set_promiscuous(true);
+    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_promiscuous(false);
+    // ---------------------------------------------------------------------
+
+    if (esp_now_init() == ESP_OK) {
+        Serial.println("✅ ESP-NOW Radio Initialized!");
+        _radioReady = true;
+    } else {
+        Serial.println("❌ Fatal error initializing radio.");
+        return;
+    }
+
+    esp_now_register_send_cb(OnDataSent);
+    esp_now_register_recv_cb(OnDataRecv);
+
+    // Register Gateway as peer
+    // Zero peerInfo to avoid memory junk
+    esp_now_peer_info_t peerInfo = {}; 
+    memcpy(peerInfo.peer_addr, gatewayAddress, 6);
+    peerInfo.channel = 1; // Force Channel 1 for transmission
+    peerInfo.encrypt = false;
+    
+    if (esp_now_add_peer(&peerInfo) != ESP_OK){
+        Serial.println("❌ Failed to add Gateway peer");
+        _radioReady = false;
+    }
 }
 
 void networkLoop() {
-    unsigned long now = millis();
-
-    // 1. Gerenciamento do Wi-Fi
-    if (WiFi.status() != WL_CONNECTED) {
-        // Tenta reconectar a cada 15 segundos para não travar o DHCP do roteador
-        if (now - _lastWifiAttempt > 15000) {
-            _lastWifiAttempt = now;
-            Serial.print("[WiFi] Tentando reconectar ao SSID: ");
-            Serial.println(_ssid);
-            WiFi.disconnect();
-            WiFi.begin(_ssid.c_str(), _pass.c_str());
-        }
-        return; // Se não tem Wi-Fi, não tenta TCP
-    }
-
-    // 2. Gerenciamento do Servidor TCP
-    if (!client.connected()) {
-        if (now - _lastTcpAttempt > 3000) { // Tenta TCP a cada 3 segundos
-            _lastTcpAttempt = now;
-            
-            Serial.print("[TCP] Tentando conectar ao Server: ");
-            Serial.println(_serverIP);
-
-            if (client.connect(_serverIP.c_str(), _serverPort)) {
-                Serial.println("✅ [TCP] CONECTADO! Enviando Handshake...");
-                client.println("ID:" + WiFi.macAddress());
-                unsigned long start = millis();
-                while (!client.available() && millis() - start < 1000) delay(10);
-                while (client.available()) client.read(); // Limpa buffer
-            } else {
-                Serial.println("❌ [TCP] Falha na conexão. Servidor desligado ou porta bloqueada.");
-            }
-        }
-    } else {
-        // 3. Keep-Alive (Ping)
-        if (now - _lastPing > 5000) {
-            _lastPing = now;
-            client.println("PING");
-            // Nota: Limpar o buffer agressivamente pode engolir respostas assíncronas do servidor.
-            // Se notar perda de dados, comente o while abaixo no futuro.
-            while(client.available()) client.read();
-        }
-    }
+    // ESP-NOW does not require manual keep-alive or reconnection.
+    // Radio stays active listening for packets.
 }
 
 bool isConnected() {
-    return WiFi.status() == WL_CONNECTED && client.connected();
+    return _radioReady;
 }
 
 OrderInfo requestOrderInfo() {
     OrderInfo info = {0, ""};
-    
     if (!isConnected()) return info;
 
-    while(client.available()) client.read(); // Limpa lixo do buffer
-    
-    client.println("GET_ORDER");
+    _orderReceived = false;
 
+    // Monta o pacote e joga no ar
+    CommandMessage msg;
+    msg.type = MSG_TYPE_CMD;
+    strcpy(msg.text, "GET_ORDER");
+    esp_now_send(gatewayAddress, (uint8_t *) &msg, sizeof(msg));
+
+    // Wait for asynchronous Gateway response (max 2s)
     unsigned long start = millis();
-    while (!client.available()) {
-        if (millis() - start > 2000) return info; // Timeout de 2 segundos
-        delay(10);
+    while (!_orderReceived) {
+        if (millis() - start > 2000) {
+            Serial.println("⚠️ Timeout waiting for Order.");
+            return info; 
+        }
+        delay(10); // Prevent Watchdog Reset
     }
     
-    String resp = client.readStringUntil('\n');
-    resp.trim(); 
-    if (resp.startsWith("ORDER:")) {
-        int firstColon = resp.indexOf(':');
-        int secondColon = resp.indexOf(':', firstColon + 1);
-        
-        if (secondColon > 0) {
-            String idStr = resp.substring(firstColon + 1, secondColon);
-            String codeStr = resp.substring(secondColon + 1);
-            info.id = idStr.toInt();
-            info.code = codeStr;
-        } else {
-            info.id = resp.substring(6).toInt();
-            info.code = "OP-" + String(info.id);
-        }
-    }
-    return info;
+    return _lastReceivedOrder;
 }
 
 void sendStatus(String status) {
-    if (isConnected()) client.println("STATUS:" + status);
+    if (!isConnected()) return;
+
+    CommandMessage msg;
+    msg.type = MSG_TYPE_CMD;
+    String payload = "STATUS:" + status;
+    payload.toCharArray(msg.text, 100);
+    
+    esp_now_send(gatewayAddress, (uint8_t *) &msg, sizeof(msg));
 }
 
-bool sendJsonLog(long orderId, double cycleTime, double pausedTime, int qtyProd, int qtyPaused) {
+bool sendLog(long orderId, double cycleTime, double pausedTime, int qtyProd, int qtyPaused) {
     if (!isConnected()) return false;
     
-    while(client.available()) client.read();
+    _ackReceived = false;
 
-    JsonDocument doc; // Suporta ArduinoJson v7
-    doc["orderId"] = orderId;
-    doc["cycleTime"] = cycleTime;
-    doc["pausedTime"] = pausedTime;
-    doc["quantityProduced"] = qtyProd;
-    doc["quantityPaused"] = qtyPaused;
+    // Fast binary struct assembly (no heavy JSON)
+    LogMessage logMsg;
+    logMsg.type = MSG_TYPE_LOG;
+    logMsg.orderId = orderId;
+    logMsg.cycleTime = cycleTime;
+    logMsg.pausedTime = pausedTime;
+    logMsg.qtyProd = qtyProd;
+    logMsg.qtyPaused = qtyPaused;
 
-    String jsonStr;
-    serializeJson(doc, jsonStr);
-    
-    client.println(jsonStr);
-    
+    // Broadcast data
+    esp_now_send(gatewayAddress, (uint8_t *) &logMsg, sizeof(logMsg));
+
+    // Wait for database write confirmation (max 4s)
     unsigned long start = millis();
-    while (millis() - start < 4000) { // Timeout de 4 segundos esperando resposta
-        if (client.available()) {
-            String line = client.readStringUntil('\n');
-            line.trim();
-            if (line == "OK_LOG") {
-                return true; 
-            }
+    while (!_ackReceived) { 
+        if (millis() - start > 4000) {
+            Serial.println("❌ Timeout waiting for OK_LOG confirmation");
+            return false;
         }
         delay(10);
     }
 
-    Serial.println("❌ Timeout esperando OK_LOG do servidor");
-    return false;
+    return true; // Se chegou aqui, _ackReceived ficou true!
+}
+
+bool pingServer() {
+    if (!isConnected()) return false;
+    
+    _pongReceived = false;
+
+    CommandMessage msg;
+    msg.type = MSG_TYPE_CMD;
+    strcpy(msg.text, "PING");
+    esp_now_send(gatewayAddress, (uint8_t *) &msg, sizeof(msg));
+
+    // Wait up to 2.5s for server response
+    unsigned long start = millis();
+    while (!_pongReceived) {
+        if (millis() - start > 2500) {
+            return false; 
+        }
+        delay(10);
+    }
+    
+    return true; // Success: OK_PONG received!
 }

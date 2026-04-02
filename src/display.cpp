@@ -17,7 +17,7 @@ void displayInit()
         u8g2.begin();
         u8g2.clearBuffer();
         u8g2.setFont(u8g2_font_ncenB08_tr);
-        u8g2.drawStr(0, 15, "Iniciando...");
+        u8g2.drawStr(0, 15, "Starting...");
         u8g2.sendBuffer();
     }
     else
@@ -67,7 +67,7 @@ void displayProduction(String opCode, unsigned long seconds, int qty)
     u8g2.print(timeStr);
 
     u8g2.setFont(u8g2_font_5x7_tr);
-    u8g2.drawStr(0, 60, "PRODUZINDO...");
+    u8g2.drawStr(0, 60, "PRODUCTION...");
 
     u8g2.sendBuffer();
 }
@@ -84,10 +84,10 @@ void displayPaused(unsigned long seconds)
 
     u8g2.clearBuffer();
     u8g2.setFont(u8g2_font_helvB12_tr);
-    u8g2.drawStr(20, 15, "PAUSADO");
+    u8g2.drawStr(20, 15, "PAUSED");
 
     u8g2.setFont(u8g2_font_profont12_tr);
-    u8g2.drawStr(0, 35, "Tempo Pausa:");
+    u8g2.drawStr(0, 35, "Pause Time:");
 
     u8g2.setFont(u8g2_font_helvB18_tr);
     u8g2.setCursor(30, 58);
@@ -103,7 +103,7 @@ void displayError(String msg)
 
     u8g2.clearBuffer();
     u8g2.setFont(u8g2_font_helvB10_tr);
-    u8g2.drawStr(0, 15, "ERRO");
+    u8g2.drawStr(0, 15, "ERROR");
     u8g2.setFont(u8g2_font_6x10_tr);
     u8g2.setCursor(0, 35);
     u8g2.print(msg);

@@ -13,16 +13,15 @@
 #define PIN_LED_B 12
 #define PIN_BUZZER 27
 
-const char *SSID = "WIFI_SSID";
-const char *PASS = "WIFI_PASS";
-const char *IP = "TCP_SERVER_IP";
-const int PORT = 5050;
+// Use real Gateway MAC address here
+uint8_t gatewayMacAddress[] = {0x30, 0xAE, 0xA4, 0xDB, 0x29, 0x74};
 
 Timer prodTimer;
 Timer pauseTimer;
 
 enum State { IDLE, RUNNING, PAUSED };
 State currentState = IDLE;
+bool serverOnline = false; // Backend connection status
 
 long currentOrderId = 0;
 String currentOrderCode = "";
@@ -33,8 +32,6 @@ unsigned long longBeepStartTime = 0;
 
 unsigned long lastAutoSave = 0;
 const unsigned long AUTO_SAVE_INTERVAL = 180000;
-
-bool lastConnectionState = false;
 
 void forceStateSave(bool activeStatus) {
     MachineState ms = {
@@ -60,31 +57,27 @@ void setup() {
     displayInit();
     persistenceInit();
 
-    updateStatus("Conectando WiFi", SSID);
-    networkInit(SSID, PASS, IP, PORT);
+    updateStatus("Starting Radio", "ESP-NOW");
+    networkInit(gatewayMacAddress);
 
-    unsigned long startAttempt = millis();
+    updateStatus("Connecting...", "Java Server");
     
-    // Feedback visual de boot
-    while (!isConnected() && millis() - startAttempt < 15000) {
-        networkLoop();
-        
-        if (WiFi.status() == WL_CONNECTED) {
-            setLedColor(LED_GREEN);
-            setBlink(true, 250); // Wi-Fi OK, conectando TCP
-        } else {
-            setLedColor(LED_RED);
-            setBlink(true, 500); // Buscando Wi-Fi
-        }
-        
-        ledsLoop();
-        delay(100);
-    }
+    // Test server connectivity (Java backend)
+    serverOnline = pingServer();
 
-    lastConnectionState = isConnected();
+    if (serverOnline) {
+        setLedColor(LED_GREEN);
+        setBlink(true, 100); // Fast green: connection successful!
+        delay(1500); 
+    } else {
+        setLedColor(LED_RED);
+        setBlink(true, 500); // Red: radio or server error
+        delay(1500);
+    }
+    setBlink(false, 0);
 
     MachineState saved = loadState();
-    bool switchOn = !digitalRead(PIN_SWITCH_PROD);
+    bool switchOn = (digitalRead(PIN_SWITCH_PROD) == LOW); 
 
     if (saved.active && switchOn) {
         currentOrderId = saved.orderId;
@@ -94,18 +87,24 @@ void setup() {
         prodTimer.set((unsigned long)saved.prodTime);
         pauseTimer.set((unsigned long)saved.pauseTime);
 
-        if (!digitalRead(PIN_BTN_PAUSE)) {
+        if (digitalRead(PIN_BTN_PAUSE) == LOW) {
             currentState = PAUSED;
             pauseTimer.start();
         } else {
             currentState = RUNNING;
             prodTimer.start();
         }
-
-        if (isConnected()) sendStatus(currentState == RUNNING ? "RUNNING" : "PAUSED");
     } else {
         clearState();
         currentState = IDLE;
+    }
+    
+    // Send initial status on startup to update Web dashboard
+    delay(500); // Wait for radio stabilization
+    if (serverOnline) {
+        if (currentState == RUNNING) sendStatus("RUNNING");
+        else if (currentState == PAUSED) sendStatus("PAUSED");
+        else sendStatus("IDLE");
     }
 }
 
@@ -114,51 +113,53 @@ void finalizeProduction() {
     if (currentState == PAUSED) pauseTimer.pause();
 
     if (prodTimer.getSeconds() < 10) {
-        updateStatus("CANCELADO", "Tempo curto (<10s)");
+        updateStatus("CANCELLED", "Short time (<10s)");
         clearState();
         delay(2000);
-        if (isConnected()) sendStatus("IDLE");
         currentState = IDLE;
+        if (serverOnline) sendStatus("IDLE");
         return;
     }
 
-    updateStatus("Finalizando...", "Enviando Log");
+    updateStatus("Finalizing...", "Sending Log");
 
-    if (isConnected()) {
-        bool sent = sendJsonLog(currentOrderId, (double)prodTimer.getSeconds(), (double)pauseTimer.getSeconds(), 1, pauseCount);
-        if (sent) {
-            updateStatus("SUCESSO", "Log Salvo");
-            clearState();
-            delay(1000);
-        } else {
-            displayError("Erro Ack Server");
-            enqueueOfflineLog(currentOrderId, (double)prodTimer.getSeconds(), (double)pauseTimer.getSeconds(), pauseCount);
-            clearState();
-            delay(2000);
-        }
+    bool sent = sendLog(currentOrderId, (double)prodTimer.getSeconds(), (double)pauseTimer.getSeconds(), 1, pauseCount);
+    
+    if (sent) {
+        updateStatus("SUCCESS", "Log Saved");
+        clearState();
+        delay(1000);
     } else {
-        displayError("Offline - Na Fila");
+        displayError("Offline - Queued");
         enqueueOfflineLog(currentOrderId, (double)prodTimer.getSeconds(), (double)pauseTimer.getSeconds(), pauseCount);
         clearState();
         delay(2000);
     }
 
-    if (isConnected()) sendStatus("IDLE");
     currentState = IDLE;
+    if (serverOnline) sendStatus("IDLE");
 }
 
 void loop() {
     networkLoop();
     ledsLoop();
 
-    bool currentConnection = isConnected();
-
-    if (currentConnection && !lastConnectionState) {
-        if (currentState == RUNNING) sendStatus("RUNNING");
-        else if (currentState == PAUSED) sendStatus("PAUSED");
-        else if (currentState == IDLE) sendStatus("IDLE");
+    // --- SMART HEARTBEAT ---
+    // Every 15 seconds notifies backend to replace TCP PING
+    static unsigned long lastHeartbeat = 0;
+    if (millis() - lastHeartbeat > 15000) {
+        lastHeartbeat = millis();
+        
+        // Check if server is reachable
+        serverOnline = pingServer(); 
+        
+        // If online, update current state in database
+        if (serverOnline) {
+            if (currentState == IDLE) sendStatus("IDLE");
+            else if (currentState == RUNNING) sendStatus("RUNNING");
+            else if (currentState == PAUSED) sendStatus("PAUSED");
+        }
     }
-    lastConnectionState = currentConnection;
 
     if (isLongBeeping) {
         if (millis() - longBeepStartTime < 2000) digitalWrite(PIN_BUZZER, HIGH);
@@ -170,27 +171,31 @@ void loop() {
         digitalWrite(PIN_BUZZER, LOW);
     }
 
-    bool switchOn = !digitalRead(PIN_SWITCH_PROD);
-    bool isPauseHeld = !digitalRead(PIN_BTN_PAUSE);
+    // --- PHYSICAL INPUTS AND MOTION DETECTION ---
+    bool switchOn = (digitalRead(PIN_SWITCH_PROD) == LOW);
+    bool isPauseHeld = (digitalRead(PIN_BTN_PAUSE) == LOW);
+
+    // Detect only the moment the switch is turned on (edge detection)
+    static bool lastSwitchState = false;
+    bool switchJustTurnedOn = (switchOn && !lastSwitchState);
+    lastSwitchState = switchOn;
 
     int pendingLogs = getOfflineLogCount();
-    bool isFlushing = (currentState == IDLE && currentConnection && pendingLogs > 0);
+    bool isFlushing = (currentState == IDLE && pendingLogs > 0);
 
-    // Gestão visual baseada em rede e estado
+    // --- LED STATUS SYSTEM ---
     if (isFlushing) {
         setLedColor(LED_BLUE);
         setBlink(true, 200);
     } else {
         if (currentState == IDLE) {
-            if (currentConnection) {
+            // Green only if both radio and server are connected
+            if (isConnected() && serverOnline) {
                 setLedColor(LED_GREEN);
-                setBlink(false); // Tudo OK
-            } else if (WiFi.status() == WL_CONNECTED) {
-                setLedColor(LED_GREEN);
-                setBlink(true, 500); // Sem TCP
+                setBlink(false); 
             } else {
                 setLedColor(LED_RED);
-                setBlink(false); // Sem Wi-Fi
+                setBlink(false); 
             }
         } else if (currentState == RUNNING) {
             setLedColor(LED_BLUE);
@@ -202,52 +207,42 @@ void loop() {
     }
 
     if (isFlushing) {
-        updateStatus("Fazendo Flush", String(pendingLogs) + " pendentes");
-        OfflineLog nextLog = peekOfflineLog();
-        if (nextLog.valid) {
-            bool sent = sendJsonLog(nextLog.orderId, nextLog.prodTime, nextLog.pauseTime, 1, nextLog.pauseCount);
-            if (sent) {
-                popOfflineLog();
-                delay(500);
+        static unsigned long lastFlushAttempt = 0;
+        if (millis() - lastFlushAttempt > 1500) { 
+            lastFlushAttempt = millis();
+            updateStatus("Flushing", String(pendingLogs) + " pending");
+            
+            OfflineLog nextLog = peekOfflineLog();
+            if (nextLog.valid) {
+                bool sent = sendLog(nextLog.orderId, nextLog.prodTime, nextLog.pauseTime, 1, nextLog.pauseCount);
+                if (sent) popOfflineLog(); 
+                else displayError("Flush Error");
             } else {
-                displayError("Erro no Flush");
-                delay(2000);
+                popOfflineLog();
             }
-        } else {
-            popOfflineLog();
         }
     }
 
     switch (currentState) {
         case IDLE:
-            if (switchOn) {
+            // Triggered exactly when the switch is turned ON
+            if (switchJustTurnedOn) {
                 if (isFlushing) {
-                    displayError("Aguarde Flush!");
+                    displayError("Wait for Flush!");
                     delay(1500);
                     break;
                 }
-                updateStatus("Buscando OP...", "");
+                updateStatus("Fetching Order...", "");
 
-                if (currentConnection) {
-                    OrderInfo info = requestOrderInfo();
-                    if (info.id > 0) {
-                        currentOrderId = info.id;
-                        currentOrderCode = info.code;
-                    } else {
-                        displayError("Sem OP Ativa");
-                        delay(2000);
-                        break;
-                    }
+                OrderInfo info = requestOrderInfo();
+                if (info.id > 0) {
+                    currentOrderId = info.id;
+                    currentOrderCode = info.code;
                 } else {
-                    MachineState lastKnown = loadState();
-                    if (lastKnown.orderId > 0) {
-                        currentOrderId = lastKnown.orderId;
-                        currentOrderCode = lastKnown.orderCode;
-                    } else {
-                        displayError("Sem Rede e Sem OP");
-                        delay(2000);
-                        break;
-                    }
+                    displayError("No Active OP");
+                    delay(2000);
+                    // Loop won't repeat! Operator must toggle switch OFF and ON again.
+                    break;
                 }
 
                 prodTimer.reset();
@@ -259,12 +254,12 @@ void loop() {
                     currentState = PAUSED;
                     pauseCount = 1;
                     pauseTimer.start();
-                    if (currentConnection) sendStatus("PAUSED");
+                    if (serverOnline) sendStatus("PAUSED");
                 } else {
                     currentState = RUNNING;
                     pauseCount = 0;
                     prodTimer.start();
-                    if (currentConnection) sendStatus("RUNNING");
+                    if (serverOnline) sendStatus("RUNNING");
                 }
                 forceStateSave(true);
                 lastAutoSave = millis();
@@ -278,7 +273,7 @@ void loop() {
                 pauseTimer.start();
                 currentState = PAUSED;
                 pauseCount++;
-                if (currentConnection) sendStatus("PAUSED");
+                if (serverOnline) sendStatus("PAUSED");
                 forceStateSave(true);
                 lastAutoSave = millis();
             }
@@ -290,7 +285,7 @@ void loop() {
                 pauseTimer.pause();
                 prodTimer.start();
                 currentState = RUNNING;
-                if (currentConnection) sendStatus("RUNNING");
+                if (serverOnline) sendStatus("RUNNING");
                 forceStateSave(true);
                 lastAutoSave = millis();
             }
@@ -308,10 +303,14 @@ void loop() {
         if (currentState == RUNNING) displayProduction(currentOrderCode, prodTimer.getSeconds(), 1);
         else if (currentState == PAUSED) displayPaused(pauseTimer.getSeconds());
         else if (currentState == IDLE && !isFlushing) {
-            if (currentConnection) updateStatus("PRONTO", "Aguardando...");
+            if (!serverOnline) {
+                 updateStatus("OFFLINE", "Server Error");
+            }
+            else if (pendingLogs > 0) {
+                 updateStatus("READY", String(pendingLogs) + " in queue");
+            }
             else {
-                if (pendingLogs > 0) updateStatus("OFFLINE", String(pendingLogs) + " na fila");
-                else updateStatus("OFFLINE", "Aguardando...");
+                 updateStatus("READY", "Waiting...");
             }
         }
     }

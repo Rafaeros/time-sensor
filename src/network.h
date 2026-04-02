@@ -1,5 +1,6 @@
 #ifndef NETWORK_H
 #define NETWORK_H
+
 #include <Arduino.h>
 
 struct OrderInfo {
@@ -7,13 +8,13 @@ struct OrderInfo {
     String code;
 };
 
-void networkInit(const char* ssid, const char* pass, const char* serverIP, int port);
+// Initialization requires the Gateway MAC address
+void networkInit(uint8_t *gatewayMac);
+bool pingServer();
 void networkLoop();
 bool isConnected();
-
-OrderInfo requestOrderInfo(); 
-
+OrderInfo requestOrderInfo();
 void sendStatus(String status);
-bool sendJsonLog(long orderId, double cycleTime, double pausedTime, int qtyProd, int qtyPaused);
+bool sendLog(long orderId, double cycleTime, double pausedTime, int qtyProd, int qtyPaused);
 
 #endif
